@@ -1,0 +1,127 @@
+import logging
+from pathlib import Path
+
+from aiogram import Bot, F, Router
+from aiogram.types import FSInputFile, Message
+
+from convert.errors import StickerloomError, UnsupportedInput
+from convert.queue import JobQueue
+from convert.spec import (
+    MAX_SOURCE_BYTES,
+    OUTPUT_SUFFIX,
+    REJECTED_EXTENSIONS,
+    SUPPORTED_EXTENSIONS,
+)
+from models import ConvertResult, Job
+
+log = logging.getLogger(__name__)
+
+router = Router()
+
+MEDIA = F.document | F.photo | F.sticker | F.animation | F.video | F.video_note
+
+TGS_HINT = (
+    "Animated Telegram stickers (.tgs) are already usable in a pack, "
+    "there is nothing to convert. Send a picture, GIF or video instead."
+)
+
+
+def _source(message: Message) -> tuple[str, str, int]:
+    """Pick the file to convert and name it, so the extension drives validation."""
+    if message.document:
+        doc = message.document
+        return doc.file_id, doc.file_name or "file", doc.file_size or 0
+    if message.photo:
+        photo = message.photo[-1]
+        return photo.file_id, "photo.jpg", photo.file_size or 0
+    if message.sticker:
+        sticker = message.sticker
+        if sticker.is_animated:
+            raise UnsupportedInput(TGS_HINT)
+        suffix = ".webm" if sticker.is_video else ".webp"
+        return sticker.file_id, f"sticker{suffix}", sticker.file_size or 0
+    if message.animation:
+        anim = message.animation
+        return anim.file_id, anim.file_name or "animation.mp4", anim.file_size or 0
+    if message.video:
+        video = message.video
+        return video.file_id, video.file_name or "video.mp4", video.file_size or 0
+    if message.video_note:
+        note = message.video_note
+        return note.file_id, "video_note.mp4", note.file_size or 0
+    raise UnsupportedInput("Send a picture, sticker, GIF or short video.")
+
+
+def _validate(name: str, size: int) -> None:
+    suffix = Path(name).suffix.lower()
+    if suffix in REJECTED_EXTENSIONS:
+        raise UnsupportedInput(TGS_HINT)
+    if suffix not in SUPPORTED_EXTENSIONS:
+        listed = ", ".join(sorted(SUPPORTED_EXTENSIONS))
+        raise UnsupportedInput(f"Cannot read {suffix or 'this file'}. Supported: {listed}")
+    if size > MAX_SOURCE_BYTES:
+        raise UnsupportedInput(
+            f"That file is {size // (1024 * 1024)} MB. "
+            f"Telegram only lets bots download up to {MAX_SOURCE_BYTES // (1024 * 1024)} MB."
+        )
+
+
+def _caption(result: ConvertResult) -> str:
+    return (f"{result.width}x{result.height} - {result.duration:.1f}s - "
+            f"{result.size // 1024} KB")
+
+
+@router.message(MEDIA)
+async def handle_media(message: Message, bot: Bot, queue: JobQueue) -> None:
+    assert message.from_user
+    user_id = message.from_user.id
+
+    try:
+        file_id, name, size = _source(message)
+        _validate(name, size)
+    except StickerloomError as exc:
+        await message.answer(str(exc))
+        return
+
+    status = await message.answer(f"{name}: queued")
+
+    async def fetch(work_dir: Path) -> Path:
+        target = work_dir / name
+        await bot.download(file_id, destination=target)
+        return target
+
+    async def on_status(_: str) -> None:
+        await _edit(status, f"{name}: converting")
+
+    async def on_done(result: ConvertResult) -> None:
+        document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
+        await message.answer_document(document, caption=_caption(result))
+        await _delete(status)
+
+    async def on_error(exc: Exception) -> None:
+        if isinstance(exc, StickerloomError):
+            await _edit(status, f"{name}: {exc}")
+            return
+        log.exception("unexpected failure converting %r", name)
+        await _edit(status, f"{name}: something went wrong, try another file")
+
+    position = await queue.submit(Job(
+        key=user_id, name=name, fetch=fetch,
+        on_status=on_status, on_done=on_done, on_error=on_error,
+    ))
+    if position > 1:
+        await _edit(status, f"{name}: queued, {position} in line")
+
+
+async def _edit(status: Message, text: str) -> None:
+    try:
+        await status.edit_text(text)
+    except Exception:
+        log.debug("could not edit status message", exc_info=True)
+
+
+async def _delete(status: Message) -> None:
+    try:
+        await status.delete()
+    except Exception:
+        log.debug("could not delete status message", exc_info=True)
