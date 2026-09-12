@@ -80,3 +80,7 @@ def test_ladder_only_ever_increases_pressure():
     assert rates == sorted(rates, reverse=True)
     assert all(0 < crf <= 63 for crf in crfs)
     assert all(0 < fps <= FPS for fps in rates)
+
+
+def test_ladder_ends_low_enough_for_incompressible_content():
+    assert LADDER[-1] == (63, 8)

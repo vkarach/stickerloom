@@ -9,7 +9,7 @@ from models import ConvertResult, MediaInfo
 
 log = logging.getLogger(__name__)
 
-# quality first, frame rate only once crf is spent
+# crf 63 maxes out the quantizer and one-pass libvpx ignores -b:v, so fps is the last lever
 LADDER: tuple[tuple[int, int], ...] = (
     (32, 30),
     (40, 30),
@@ -18,6 +18,8 @@ LADDER: tuple[tuple[int, int], ...] = (
     (63, 30),
     (63, 20),
     (63, 15),
+    (63, 10),
+    (63, 8),
 )
 
 
