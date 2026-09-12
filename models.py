@@ -9,6 +9,8 @@ class MediaInfo:
     duration: float
     frames: int
     is_animated: bool
+    # ffmpeg cannot decode animated webp, such a source is expanded to PNG frames first
+    needs_frame_expansion: bool = False
 
 
 @dataclass(frozen=True)
