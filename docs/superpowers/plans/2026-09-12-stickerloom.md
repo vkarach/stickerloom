@@ -6,7 +6,12 @@
 
 **Architecture:** Two independent packages. `convert/` owns the format and shells out to ffmpeg, importable and testable without a bot token. `bot/` is the aiogram layer and holds no conversion logic. They meet only at the dataclasses in `models.py`. An in-memory queue with a fixed worker pool keeps the bot responsive under a batch.
 
-**Tech Stack:** Python 3.14, aiogram 3, python-dotenv, pytest + pytest-asyncio, ffmpeg/ffprobe on PATH.
+**Tech Stack:** Python 3.14, aiogram 3, python-dotenv, Pillow, pytest + pytest-asyncio, ffmpeg/ffprobe on PATH.
+
+**Amendment (during Task 3):** ffmpeg cannot decode animated WebP at all - ffprobe
+reports it as 0x0 and a decode attempt fails outright. Since the spec accepts
+animated WebP, Task 3 detects that case with Pillow and Task 4 expands such a
+source into a PNG frame sequence before encoding. See Task 3a.
 
 **Spec:** `docs/superpowers/specs/2026-09-12-stickerloom-design.md`
 
@@ -68,6 +73,24 @@
 - [ ] Write the failing tests against captured ffprobe JSON: a still image (no duration, one frame, not animated), an animated GIF, an MP4 with an audio stream present, and a payload with no video stream at all which must raise `ProbeFailed`.
 - [ ] Run them, confirm they fail.
 - [ ] Implement `parse_probe`, then `probe` on top of it via `asyncio.create_subprocess_exec` with `-show_streams -show_format -print_format json`.
+- [ ] Run them, confirm they pass.
+- [ ] Commit.
+
+---
+
+### Task 3a: Animated WebP frame expansion
+
+**Files:**
+- Create: `convert/decode.py`
+- Test: `tests/test_decode.py`
+
+**Interfaces:**
+- Produces: `inspect_webp(path) -> tuple[int, int, int, float]` - width, height, frame count and duration read through Pillow.
+- Produces: `expand_frames(path, out_dir) -> tuple[str, float]` - writes `frame_%05d.png` and returns the sequence pattern together with the source frame rate.
+
+- [ ] Write the failing tests: a still WebP reports one frame; an animated WebP reports its real dimensions and frame count where ffprobe reported 0x0; expansion writes exactly that many PNG files and reports a sane frame rate.
+- [ ] Run them, confirm they fail.
+- [ ] Implement over Pillow, deriving the frame rate from the per-frame durations.
 - [ ] Run them, confirm they pass.
 - [ ] Commit.
 
