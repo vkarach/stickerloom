@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -21,3 +22,14 @@ class ConvertResult:
     duration: float
     size: int
     attempts: int
+
+
+@dataclass
+class Job:
+    key: int
+    name: str
+    fetch: Callable[[Path], Awaitable[Path]]
+    on_status: Callable[[str], Awaitable[None]]
+    on_done: Callable[[ConvertResult], Awaitable[None]]
+    on_error: Callable[[Exception], Awaitable[None]]
+    cancelled: bool = field(default=False, compare=False)
