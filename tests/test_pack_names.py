@@ -10,7 +10,7 @@ LEGAL = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 @pytest.mark.parametrize("title", [
     "My Pack", "tiktok comments", "UPPER CASE", "dots.and,commas!",
-    "кошки", "123 start", "a", "  spaced  out  ",
+    "\u043a\u043e\u0448\u043a\u0438", "123 start", "a", "  spaced  out  ",
     "double__underscore", "_leading", "trailing_",
 ])
 def test_every_name_is_legal_for_telegram(title):
@@ -20,7 +20,7 @@ def test_every_name_is_legal_for_telegram(title):
     assert len(name) <= MAX_NAME
 
 
-@pytest.mark.parametrize("title", ["My Pack", "кошки", "123"])
+@pytest.mark.parametrize("title", ["My Pack", "\u043a\u043e\u0448\u043a\u0438", "123"])
 def test_the_bot_suffix_is_always_there(title):
     assert pack_name(title, BOT).endswith(f"_by_{BOT}")
 
@@ -35,7 +35,7 @@ def test_a_leading_digit_is_made_legal():
 
 
 def test_a_title_that_slugs_to_nothing_still_works():
-    name = pack_name("❤️!!!", BOT)
+    name = pack_name("\u2764\ufe0f!!!", BOT)
     assert LEGAL.match(name), name
     assert name.endswith(f"_by_{BOT}")
 

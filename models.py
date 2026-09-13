@@ -24,6 +24,14 @@ class ConvertResult:
     attempts: int
 
 
+@dataclass(frozen=True)
+class Pack:
+    user_id: int
+    name: str
+    title: str
+    created_at: str
+
+
 @dataclass
 class Job:
     key: int
