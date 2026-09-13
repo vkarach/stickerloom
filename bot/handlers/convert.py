@@ -3,15 +3,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 from aiogram import Bot, F, Router
-from aiogram.types import (
-    FSInputFile,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
-    SwitchInlineQueryChosenChat,
-)
+from aiogram.types import FSInputFile, Message
 
-from bot.recent import Delivered, recent
 from convert.errors import StickerloomError, UnsupportedInput
 from convert.queue import JobQueue
 from convert.spec import (
@@ -86,16 +79,6 @@ def _caption(result: ConvertResult) -> str:
             f"{result.size // 1024} KB")
 
 
-def _send_button(token: str) -> InlineKeyboardMarkup:
-    """Opens the chat picker limited to bots, so the file can go straight to @Stickers."""
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
-        text="Send to @Stickers",
-        switch_inline_query_chosen_chat=SwitchInlineQueryChosenChat(
-            query=token, allow_bot_chats=True,
-        ),
-    )]])
-
-
 @router.message(MEDIA)
 async def handle_media(message: Message, bot: Bot, queue: JobQueue) -> None:
     assert message.from_user
@@ -121,12 +104,7 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue) -> None:
 
     async def on_done(result: ConvertResult) -> None:
         document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
-        token = recent.reserve()
-        sent = await message.answer_document(
-            document, caption=_caption(result), reply_markup=_send_button(token),
-        )
-        if sent.document:
-            recent.store(token, Delivered(user_id, sent.document.file_id, name, source.emoji))
+        await message.answer_document(document, caption=_caption(result))
         if source.emoji:
             await message.answer(source.emoji)
         await _delete(status)
