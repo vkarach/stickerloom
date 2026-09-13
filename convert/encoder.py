@@ -105,4 +105,5 @@ async def _run(args: list[str]) -> None:
     if process.returncode != 0:
         detail = stderr.decode(errors="replace").strip().splitlines()
         log.error("ffmpeg failed: %s", detail[-1] if detail else "no output")
+        log.error("ffmpeg call was: %s", " ".join(args))
         raise EncodeFailed("Could not convert that file.")
