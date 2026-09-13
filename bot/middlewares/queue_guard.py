@@ -19,6 +19,6 @@ class QueueGuardMiddleware(BaseMiddleware):
 
         if queue.pending_for(user.id) >= MAX_PENDING_PER_USER:
             log.info("user %s hit the queue cap", user.id)
-            await event.answer(f"{MAX_PENDING_PER_USER} at a time. Wait.")
+            await event.answer(f"{MAX_PENDING_PER_USER} at a time. Wait for these.")
             return None
         return await handler(event, data)

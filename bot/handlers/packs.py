@@ -504,7 +504,7 @@ async def cmd_emoji(message: Message, command: CommandObject, repo: PackRepo) ->
     raw = (command.args or "").strip()
     if not raw:
         current = await repo.emoji_for(message.from_user.id)
-        await message.answer(f"Default emoji: {current}")
+        await message.answer(f"Default emoji: {current}. Send /emoji 😱 to change.")
         return
 
     if not is_emoji(raw):

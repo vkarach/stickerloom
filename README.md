@@ -69,8 +69,8 @@ real ffmpeg that assert the output really matches the format table above.
 - `/start` - what the bot does
 - `/help` - all commands
 - `/cancel` - stop whatever is in progress
+- `/newpack`, `/done`, `/mypacks`, `/import`, `/emoji` - the pack flow
 - `/format` - the exact output format
-- `/pack` - how to load the files into a pack
 
 ## Building a pack
 

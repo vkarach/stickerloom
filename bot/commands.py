@@ -17,6 +17,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("start", "What this bot does"),
     CommandSpec("help", "Show all commands"),
     CommandSpec("cancel", "Stop whatever is in progress"),
+
     CommandSpec("newpack", "Start a pack", group="Packs"),
     CommandSpec("done", "Finish the pack", group="Packs"),
     CommandSpec("mypacks", "Your packs", group="Packs"),
@@ -24,7 +25,6 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("emoji", "Default emoji", group="Packs"),
 
     CommandSpec("format", "What the output looks like", group="Reference"),
-    CommandSpec("pack", "Doing it by hand in @Stickers", group="Reference"),
 )
 
 BY_NAME: dict[str, CommandSpec] = {c.name: c for c in COMMANDS}

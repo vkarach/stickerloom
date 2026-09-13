@@ -1,42 +1,35 @@
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
-from aiogram.utils.formatting import Bold, Text, as_list, as_marked_section
+from aiogram.utils.formatting import Bold, Text, as_marked_section
 
 from bot.commands import help_content
 from bot.handlers.packs import drop_preview
 from db.packs import PackRepo
 from convert.queue import JobQueue
-from convert.spec import FPS, LONG_SIDE, MAX_BYTES, MAX_DURATION
+from convert.spec import FPS, LONG_SIDE, MAX_BYTES, MAX_DURATION, STILL_DURATION
 
 router = Router()
 
 START = Text(
-    "Send a picture, sticker, GIF or video, get back a video sticker.\n\n",
-    "/newpack to build a pack here.\n",
-    "/import to copy a pack made in @Stickers.",
+    "Send a picture, sticker, GIF or video - it comes back as a video sticker, "
+    "ready to go into a pack.\n\n",
+    "Or build the pack right here:\n",
+    "/newpack - name it, send files, /done\n",
+    "/mypacks - add stickers, change an emoji, delete a pack\n",
+    "/import - copy a pack made in @Stickers or another bot\n\n",
+    "/help for the rest.",
 )
 
 FORMAT = as_marked_section(
-    Bold("Output"),
-    Text("WebM, VP9, transparency kept"),
-    Text(f"long side {LONG_SIDE} px, never padded"),
-    Text(f"up to {MAX_DURATION:.0f} s, {FPS} fps, no audio"),
-    Text(f"up to {MAX_BYTES // 1024} KB"),
-    Text("a still picture becomes a 1 s clip"),
+    Bold("Every file comes back as"),
+    Text("WebM video, VP9 codec, transparency kept"),
+    Text(f"{LONG_SIDE} px on the long side, no black bars added"),
+    Text(f"{MAX_DURATION:.0f} seconds at most, {FPS} frames per second, sound stripped"),
+    Text(f"under {MAX_BYTES // 1024} KB, the limit Telegram sets"),
+    Text(f"a still picture turned into a {STILL_DURATION:g} second clip"),
     marker="- ",
 )
-
-PACK = as_list(
-    Bold("By hand in @Stickers"),
-    Text("1. /newpack in @Stickers, or /addsticker."),
-    Text("2. Pick ", Bold("video sticker"), "."),
-    Text("3. Forward the files as files, not as videos."),
-    Text("4. Send an emoji for each."),
-    Text("\nThis bot cannot fill a pack @Stickers made. /import copies one over."),
-    sep="\n",
-)
-
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
@@ -51,11 +44,6 @@ async def cmd_help(message: Message) -> None:
 @router.message(Command("format"))
 async def cmd_format(message: Message) -> None:
     await message.answer(**FORMAT.as_kwargs())
-
-
-@router.message(Command("pack"))
-async def cmd_pack(message: Message) -> None:
-    await message.answer(**PACK.as_kwargs())
 
 
 @router.message(Command("cancel"))
