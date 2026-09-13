@@ -45,7 +45,9 @@ def build_args(src: Path, dst: Path, info: MediaInfo, crf: int, fps: int,
     else:
         source = ["-loop", "1", "-framerate", str(fps), "-i", str(src)]
 
-    chain = f"scale={width}:{height}:flags={scaler},fps={fps},format=yuva420p"
+    # premultiply: white under transparent pixels bleeds into the edge as a client scales
+    chain = (f"scale={width}:{height}:flags={scaler},fps={fps},"
+             "format=rgba,premultiply=inplace=1,format=yuva420p")
 
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
