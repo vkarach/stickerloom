@@ -51,16 +51,10 @@ async def test_clearing_the_active_pack_keeps_it_listed(repo):
     assert len(await repo.list_for(ALICE)) == 1
 
 
-async def test_a_pending_title_is_consumed_once(repo):
-    await repo.set_pending(ALICE, "Cats")
-    assert await repo.take_pending(ALICE) == "Cats"
-    assert await repo.take_pending(ALICE) is None
-
-
 async def test_a_new_pending_title_replaces_the_old_one(repo):
     await repo.set_pending(ALICE, "Cats")
     await repo.set_pending(ALICE, "Dogs")
-    assert await repo.take_pending(ALICE) == "Dogs"
+    assert await repo.peek_pending(ALICE) == "Dogs"
 
 
 async def test_the_default_emoji_round_trips(repo):

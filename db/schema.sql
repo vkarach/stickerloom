@@ -3,7 +3,9 @@ CREATE TABLE IF NOT EXISTS users (
     active_pack    TEXT,
     pending_title  TEXT,
     emoji          TEXT,
-    awaiting_title INTEGER NOT NULL DEFAULT 0
+    asking         TEXT,
+    building       INTEGER NOT NULL DEFAULT 0,
+    editing        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS packs (
@@ -19,9 +21,12 @@ CREATE INDEX IF NOT EXISTS idx_packs_owner ON packs(user_id, created_at);
 CREATE TABLE IF NOT EXISTS queued_stickers (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL,
-    file_id    TEXT NOT NULL,
+    file_id    TEXT,
     name       TEXT NOT NULL,
     suggested  TEXT,
+    emoji      TEXT,
+    source_msg INTEGER,
+    prompt_msg INTEGER,
     created_at TEXT NOT NULL
 );
 

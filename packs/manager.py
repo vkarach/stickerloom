@@ -6,8 +6,9 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile, InputSticker
 
 from models import Pack
+from packs.emoji import MAX_EMOJI, split_emoji
 from packs.errors import NameTaken, PackFull, PackNotFound, PackNotOurs
-from packs.names import pack_name
+from packs.names import build_name, pack_name
 
 log = logging.getLogger(__name__)
 
@@ -15,8 +16,10 @@ MAX_INITIAL = 50
 STICKER_FORMAT = "video"
 ADDSTICKERS_URL = "https://t.me/addstickers/"
 
-# a freshly created set rejects additions for a moment, so STICKERSET_INVALID is retried first
+# a set answers STICKERSET_INVALID to writes for a while after it is created
 RETRY_DELAYS = (0.0, 0.6, 1.5)
+# measured: writes to a fresh set were refused for 19s, so a new pack gets a far longer budget
+FRESH_DELAYS = (0.0, 1.0, 2.0, 3.0, 5.0, 5.0, 5.0, 5.0, 5.0)
 
 
 class PackManager:
@@ -37,29 +40,83 @@ class PackManager:
         )
         return uploaded.file_id
 
-    async def create(self, user_id: int, title: str, source, emoji: str) -> Pack:
+    async def size(self, name: str) -> int | None:
+        """Sticker count, or None when the set is gone."""
+        try:
+            found = await self._bot.get_sticker_set(name=name)
+        except TelegramBadRequest:
+            return None
+        if not await self.alive(name, found.title):
+            return None
+        return len(found.stickers or [])
+
+    async def alive(self, name: str, title: str) -> bool:
+        """getStickerSet answers for deleted sets too, so liveness needs a write."""
+        try:
+            await self._bot.set_sticker_set_title(name=name, title=title)
+        except TelegramBadRequest:
+            return False
+        return True
+
+    async def remove(self, user_id: int, name: str) -> None:
+        try:
+            await self._bot.delete_sticker_set(name=name)
+        except TelegramBadRequest as exc:
+            raise _translate(exc) from exc
+        await self._repo.forget(user_id, name)
+        log.info("user %s deleted pack %s", user_id, name)
+
+    async def stickers(self, name: str) -> list:
+        """Every sticker in the set as (file_id, emoji)."""
+        found = await self._bot.get_sticker_set(name=name)
+        return [(s.file_id, s.emoji or "") for s in found.stickers or []]
+
+    async def retag(self, file_id: str, emoji: str) -> None:
+        try:
+            await self._bot.set_sticker_emoji_list(sticker=file_id, emoji_list=_emoji_list(emoji))
+        except TelegramBadRequest as exc:
+            raise _translate(exc) from exc
+
+    async def drop_sticker(self, file_id: str) -> None:
+        try:
+            await self._bot.delete_sticker_from_set(sticker=file_id)
+        except TelegramBadRequest as exc:
+            raise _translate(exc) from exc
+
+    async def create(self, user_id: int, base: str, title: str,
+                     entries: list) -> tuple[Pack, int]:
+        """Create the set with everything at once; Telegram only balks at more than 50."""
         me = await self._bot.me()
-        name = pack_name(title, me.username)
-        sticker = _sticker(source, emoji)
+        name = build_name(base, me.username)
+        first = [_sticker(source, emoji) for source, emoji in entries[:MAX_INITIAL]]
         try:
             await self._bot.create_new_sticker_set(
-                user_id=user_id, name=name, title=title, stickers=[sticker],
+                user_id=user_id, name=name, title=title, stickers=first,
             )
         except TelegramBadRequest as exc:
             raise _translate(exc, creating=True) from exc
 
-        log.info("user %s created pack %s", user_id, name)
+        added = len(first)
+        for source, emoji in entries[MAX_INITIAL:]:
+            try:
+                await self._push(user_id, name, _sticker(source, emoji), fresh=True)
+                added += 1
+            except Exception as exc:
+                log.warning("could not top up %s: %s", name, exc)
+
+        log.info("user %s created pack %s with %d stickers", user_id, name, added)
         pack = await self._repo.remember(user_id, name, title)
         await self._repo.set_active(user_id, name)
-        return pack
+        return pack, added
 
     async def add(self, user_id: int, name: str, source, emoji: str) -> None:
         await self._push(user_id, name, _sticker(source, emoji))
         log.info("user %s added a sticker to %s", user_id, name)
 
-    async def _push(self, user_id: int, name: str, sticker: InputSticker) -> None:
+    async def _push(self, user_id: int, name: str, sticker: InputSticker,
+                    fresh: bool = False) -> None:
         last: TelegramBadRequest | None = None
-        for delay in RETRY_DELAYS:
+        for delay in (FRESH_DELAYS if fresh else RETRY_DELAYS):
             if delay:
                 await asyncio.sleep(delay)
             try:
@@ -76,11 +133,11 @@ class PackManager:
         try:
             source = await self._bot.get_sticker_set(name=source_name)
         except TelegramBadRequest as exc:
-            raise PackNotFound(f"No sticker set called {source_name}") from exc
+            raise PackNotFound(f"No pack called {source_name}.") from exc
 
         stickers = list(source.stickers or [])
         if not stickers:
-            raise PackNotFound(f"{source_name} has no stickers to copy")
+            raise PackNotFound(f"{source_name} is empty.")
 
         fallback = await self._repo.emoji_for(user_id)
         me = await self._bot.me()
@@ -98,7 +155,7 @@ class PackManager:
         await self._repo.set_active(user_id, name)
 
         for sticker in stickers[MAX_INITIAL:]:
-            await self._push(user_id, name, self._copy(sticker, fallback))
+            await self._push(user_id, name, self._copy(sticker, fallback), fresh=True)
 
         log.info("user %s imported %s into %s", user_id, source_name, name)
         return pack
@@ -111,20 +168,21 @@ class PackManager:
 def _sticker(source, emoji: str) -> InputSticker:
     """Accepts a local path or a file_id already on Telegram's servers."""
     payload = FSInputFile(source) if isinstance(source, Path) else source
-    return InputSticker(sticker=payload, format=STICKER_FORMAT, emoji_list=[emoji])
+    return InputSticker(sticker=payload, format=STICKER_FORMAT, emoji_list=_emoji_list(emoji))
+
+
+def _emoji_list(emoji: str) -> list[str]:
+    return split_emoji(emoji)[:MAX_EMOJI] or [emoji]
 
 
 def _translate(exc: TelegramBadRequest, creating: bool = False) -> Exception:
     message = exc.message.upper()
     if "TOO_MUCH" in message or "TOO MUCH" in message:
-        return PackFull("That pack is full. Start a new one with /newpack.")
+        return PackFull("Pack is full. /newpack starts another.")
     if "OCCUPIED" in message:
-        return NameTaken("That name is taken, try /newpack again.")
+        return NameTaken("Prefix taken. Send another.")
     if "STICKERSET_INVALID" in message:
         if creating:
-            return NameTaken("Telegram refused that name, try /newpack again.")
-        return PackNotOurs(
-            "This bot cannot edit that pack. Only packs it created itself can be changed, "
-            "so copy it first with /import."
-        )
+            return NameTaken("Telegram refused that prefix. Send another.")
+        return PackNotOurs("This bot can only edit packs it made. Copy it with /import.")
     return exc

@@ -22,6 +22,8 @@ class JobQueue:
         self._workers: list[asyncio.Task] = []
         self._count = workers
         self._process = process
+        # one conversion at a time per user, so a batch finishes in the order it was sent
+        self._locks: dict[int, asyncio.Lock] = {}
 
     async def start(self) -> None:
         self._workers = [asyncio.create_task(self._worker(i)) for i in range(self._count)]
@@ -55,10 +57,17 @@ class JobQueue:
             job = await self._queue.get()
             try:
                 if not job.cancelled:
-                    await self._run(job)
+                    async with self._lock_for(job.key):
+                        await self._run(job)
             finally:
                 self._forget(job)
                 self._queue.task_done()
+
+    def _lock_for(self, key: int) -> asyncio.Lock:
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = self._locks[key] = asyncio.Lock()
+        return lock
 
     async def _run(self, job: Job) -> None:
         work_dir = Path(tempfile.mkdtemp(prefix="stickerloom_"))

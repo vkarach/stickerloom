@@ -11,8 +11,22 @@ DB_PATH = DB_DIR / "stickerloom.db"
 
 
 _MIGRATIONS = (
-    ("users", "awaiting_title", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "asking", "TEXT"),
+    ("users", "building", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "editing", "TEXT"),
+    ("queued_stickers", "emoji", "TEXT"),
+    ("queued_stickers", "source_msg", "INTEGER"),
+    ("queued_stickers", "prompt_msg", "INTEGER"),
 )
+
+
+async def _rebuild_queue(conn: aiosqlite.Connection) -> None:
+    """A queued row now exists before its file is converted, so file_id must be nullable."""
+    async with conn.execute("PRAGMA table_info(queued_stickers)") as cursor:
+        columns = await cursor.fetchall()
+    if any(row[1] == "file_id" and row[3] for row in columns):
+        await conn.execute("DROP TABLE queued_stickers")
+        log.info("rebuilt queued_stickers")
 
 
 async def _migrate(conn: aiosqlite.Connection) -> None:
@@ -30,6 +44,7 @@ async def connect() -> aiosqlite.Connection:
     conn.row_factory = aiosqlite.Row
     await conn.execute("PRAGMA foreign_keys = ON")
     await conn.execute("PRAGMA journal_mode = WAL")
+    await _rebuild_queue(conn)
     await conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
     await _migrate(conn)
     await conn.commit()

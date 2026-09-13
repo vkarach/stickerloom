@@ -4,7 +4,7 @@ from bot.handlers.session import prompt_keyboard, prompt_text
 from convert.spec import conforms
 from db.connection import connect
 from db.packs import PackRepo
-from models import MediaInfo, QueuedSticker
+from models import MediaInfo
 
 ALICE = 1
 
@@ -75,7 +75,6 @@ async def test_peeking_at_a_pending_title_does_not_consume_it(repo):
     await repo.set_pending(ALICE, "Cats")
     assert await repo.peek_pending(ALICE) == "Cats"
     assert await repo.peek_pending(ALICE) == "Cats"
-    assert await repo.take_pending(ALICE) == "Cats"
 
 
 def test_the_button_offers_the_suggested_emoji():
@@ -84,6 +83,5 @@ def test_the_button_offers_the_suggested_emoji():
 
 
 def test_the_prompt_mentions_the_backlog():
-    one = QueuedSticker(1, ALICE, "fid", "s.webm", None)
-    assert "more waiting" not in prompt_text(one, waiting=1)
-    assert "2 more waiting" in prompt_text(one, waiting=3)
+    assert "more" not in prompt_text(waiting=1)
+    assert "2 more" in prompt_text(waiting=3)

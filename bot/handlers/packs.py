@@ -1,18 +1,27 @@
+import asyncio
 import logging
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from aiogram.utils.formatting import Bold, Code, Text, as_list
+from aiogram.utils.formatting import Bold, Text, TextLink, as_list
 
 from bot.handlers.session import USE_SUGGESTED, accept_emoji
 from db.packs import PackRepo
 from packs import PackError, PackManager
-from packs.emoji import is_emoji
+from packs.emoji import is_emoji, split_emoji
+from packs.names import build_name, check_base
 
 log = logging.getLogger(__name__)
 
 router = Router()
+
+MAX_PICKERS = 50
+PICKERS_PER_ROW = 5
+
+# the sticker shown while its menu is open, so it can be taken away again
+_PREVIEWS: dict[int, int] = {}
 
 LINK_PREFIXES = ("https://t.me/addstickers/", "http://t.me/addstickers/", "t.me/addstickers/")
 
@@ -26,43 +35,97 @@ def set_name_from(raw: str) -> str:
     return name.strip().strip("/")
 
 
-def _keyboard(packs, active: str | None) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(
-            text=("* " if pack.name == active else "") + pack.title,
-            callback_data=f"pack:{index}",
-        )]
-        for index, pack in enumerate(packs)
-    ]
-    rows.append([InlineKeyboardButton(text="Stop adding to a pack", callback_data="pack:off")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+async def _ask_for_prefix(message: Message, user_id: int, repo: PackRepo) -> None:
+    await repo.set_asking(user_id, "prefix")
+    await message.answer("Pick a prefix for the link.")
 
 
-MAX_TITLE = 64
+async def _usable_prefix(message: Message, user_id: int, base: str, bot_name: str,
+                         repo: PackRepo, packs: PackManager) -> bool:
+    problem = check_base(base, bot_name)
+    if problem:
+        await message.answer(problem)
+        return False
+
+    name = build_name(base, bot_name)
+    known = await repo.find(user_id, name)
+    if known is None:
+        return True
+    if await packs.alive(name, known.title):
+        await _say_it_is_yours(message, known)
+        return False
+
+    await repo.forget(user_id, name)
+    return True
 
 
-async def _start_pack(message: Message, user_id: int, title: str, repo: PackRepo) -> None:
-    await repo.set_awaiting_title(user_id, False)
-    await repo.set_pending(user_id, title)
-    content = Text(
-        "Next file you send becomes the first sticker of ", Bold(title), ".\n",
-        "Telegram cannot make an empty pack, so it is created together with that file.",
-    )
-    await message.answer(**content.as_kwargs())
+async def _say_it_is_yours(message: Message, pack) -> None:
+    content = Text("That is one of your packs ",
+                   TextLink(pack.title, url=PackManager.link(pack.name)),
+                   ". /mypacks to add to it.")
+    await message.answer(**content.as_kwargs(), link_preview_options={"is_disabled": True})
+
+
+async def _build_pack(message: Message, user_id: int, base: str,
+                      repo: PackRepo, packs: PackManager) -> None:
+    """Turn everything collected since /newpack into a real pack."""
+    stickers = await repo.ready_stickers(user_id)
+    if not stickers:
+        await message.answer("Nothing to finish.")
+        return
+    title = await repo.peek_pending(user_id) or base
+    entries = [(sticker.file_id, sticker.emoji) for sticker in stickers]
+
+    try:
+        pack, added = await packs.create(user_id, base, title, entries)
+    except PackError as exc:
+        await repo.set_asking(user_id, "prefix")
+        await message.answer(str(exc))
+        return
+    except Exception:
+        log.exception("could not create pack %r for user %s", base, user_id)
+        await repo.set_asking(user_id, "prefix")
+        await message.answer("Failed. Send another prefix.")
+        return
+
+    await repo.clear_stickers(user_id)
+    await repo.set_pending(user_id, None)
+    await repo.set_asking(user_id, None)
+    await repo.set_building(user_id, False)
+    await repo.clear_active(user_id)
+
+    missing = f" {len(stickers) - added} left out." if added < len(stickers) else ""
+    await message.answer(f"Done. {PackManager.link(pack.name)}{missing}",
+                         link_preview_options={"is_disabled": True})
 
 
 @router.message(Command("newpack"))
-async def cmd_newpack(message: Message, command: CommandObject, repo: PackRepo) -> None:
+async def cmd_newpack(message: Message, command: CommandObject, bot: Bot,
+                      repo: PackRepo, packs: PackManager) -> None:
     assert message.from_user
     user_id = message.from_user.id
     title = (command.args or "").strip()
 
+    await repo.clear_active(user_id)
+    await repo.set_pending(user_id, None)
+    await repo.set_editing(user_id, None)
+    await _drop_preview(message, user_id)
+    await repo.clear_stickers(user_id)
+
     if not title:
-        await repo.set_awaiting_title(user_id, True)
-        await message.answer("What should the pack be called?")
+        await repo.set_asking(user_id, "title")
+        await message.answer("Send a name for the pack.")
         return
 
-    await _start_pack(message, user_id, title, repo)
+    await _start_collecting(message, user_id, title, repo)
+
+
+async def _start_collecting(message: Message, user_id: int, title: str,
+                            repo: PackRepo) -> None:
+    await repo.set_pending(user_id, title)
+    await repo.set_asking(user_id, None)
+    await repo.set_building(user_id, True)
+    await message.answer("Send files or stickers. /done to finish.")
 
 
 @router.message(Command("nopack"))
@@ -71,32 +134,43 @@ async def cmd_nopack(message: Message, repo: PackRepo) -> None:
     user_id = message.from_user.id
     await repo.clear_active(user_id)
     await repo.set_pending(user_id, None)
-    await repo.set_awaiting_title(user_id, False)
+    await repo.set_asking(user_id, None)
+    await repo.set_building(user_id, False)
+    await repo.set_editing(user_id, None)
+    await _drop_preview(message, user_id)
     dropped = await repo.clear_stickers(user_id)
-    extra = f" Dropped {dropped} waiting for an emoji." if dropped else ""
-    await message.answer(f"Stopped. Files come back converted and go nowhere else.{extra}")
+    extra = f" {dropped} dropped." if dropped else ""
+    await message.answer(f"Stopped.{extra}")
 
 
 @router.message(Command("done"))
-async def cmd_done(message: Message, repo: PackRepo) -> None:
+async def cmd_done(message: Message, repo: PackRepo, packs: PackManager) -> None:
     assert message.from_user
     user_id = message.from_user.id
+    await repo.set_editing(user_id, None)
+    await _drop_preview(message, user_id)
     name = await repo.active_for(user_id)
-    dropped = await repo.clear_stickers(user_id)
-    await repo.set_pending(user_id, None)
-    await repo.set_awaiting_title(user_id, False)
-    await repo.clear_active(user_id)
 
-    if not name:
-        await message.answer("Nothing was being filled.")
+    if name:
+        dropped = await repo.clear_stickers(user_id)
+        await repo.clear_active(user_id)
+        await repo.set_building(user_id, False)
+        extra = f" {dropped} dropped." if dropped else ""
+        await message.answer(f"Done. {PackManager.link(name)}{extra}",
+                             link_preview_options={"is_disabled": True})
         return
 
-    extra = f"\n{dropped} sticker(s) never got an emoji and were dropped." if dropped else ""
-    await message.answer(
-        f"Done. Your pack: {PackManager.link(name)}{extra}\n"
-        "/newpack starts another, /mypacks picks one up again.",
-        link_preview_options={"is_disabled": True},
-    )
+    if not await repo.is_building(user_id):
+        await message.answer("Nothing to finish.")
+        return
+
+    if not await repo.ready_stickers(user_id):
+        await repo.set_building(user_id, False)
+        await repo.clear_stickers(user_id)
+        await message.answer("Nothing to finish.")
+        return
+
+    await _ask_for_prefix(message, user_id, repo)
 
 
 @router.callback_query(lambda c: c.data == USE_SUGGESTED)
@@ -105,78 +179,291 @@ async def use_suggested(callback: CallbackQuery, repo: PackRepo, packs: PackMana
     user_id = callback.from_user.id
     sticker = await repo.head_sticker(user_id)
     if sticker is None:
-        await callback.answer("Nothing is waiting")
+        await callback.answer("Nothing waiting")
         return
 
     emoji = sticker.suggested or await repo.emoji_for(user_id)
     await callback.answer(emoji)
     if isinstance(callback.message, Message):
-        await callback.message.edit_reply_markup(reply_markup=None)
         await accept_emoji(callback.message, user_id, emoji, repo, packs)
 
 
 @router.message(F.text, ~F.text.startswith("/"))
-async def plain_text(message: Message, repo: PackRepo, packs: PackManager) -> None:
-    """Plain text answers whatever the bot last asked for: a title, or an emoji."""
+async def plain_text(message: Message, bot: Bot, repo: PackRepo, packs: PackManager) -> None:
+    """Plain text answers whatever the bot last asked for: a pack name, a prefix, or an emoji."""
     assert message.from_user and message.text
     user_id = message.from_user.id
     text = message.text.strip()
 
-    if await repo.is_awaiting_title(user_id):
-        if len(text) > MAX_TITLE:
-            await message.answer(f"Too long, keep it under {MAX_TITLE} characters.")
+    asking = await repo.asking_for(user_id)
+    if asking == "title":
+        await _start_collecting(message, user_id, text, repo)
+        return
+
+    if asking == "prefix":
+        me = await bot.me()
+        if await _usable_prefix(message, user_id, text, me.username, repo, packs):
+            await repo.set_asking(user_id, None)
+            await _build_pack(message, user_id, text, repo, packs)
+        return
+
+    editing = await repo.editing_for(user_id)
+    if editing:
+        if not is_emoji(text):
+            await message.answer("Emoji only.")
             return
-        await _start_pack(message, user_id, text, repo)
+        text = "".join(split_emoji(text))
+        try:
+            await packs.retag(editing, text)
+        except Exception as exc:
+            log.warning("could not retag a sticker: %s", exc)
+            await message.answer("Could not change it.")
+            return
+        await repo.set_editing(user_id, None)
+        await _drop_preview(message, user_id)
+        await message.answer(f"Emoji is now {text}.")
         return
 
     if await repo.head_sticker(user_id) is None:
         return
 
     if not is_emoji(text):
-        await message.answer("Send just the emoji, or tap the button above.")
+        await message.answer("Emoji only, or tap the button.")
         return
 
-    await accept_emoji(message, user_id, text, repo, packs)
+    await accept_emoji(message, user_id, "".join(split_emoji(text)), repo, packs)
 
 
 @router.message(Command("mypacks"))
-async def cmd_mypacks(message: Message, repo: PackRepo) -> None:
+async def cmd_mypacks(message: Message, repo: PackRepo, packs: PackManager) -> None:
     assert message.from_user
     user_id = message.from_user.id
-    packs = await repo.list_for(user_id)
-    if not packs:
-        await message.answer("No packs yet. /newpack <title> starts one.")
+    await repo.set_editing(user_id, None)
+    await _drop_preview(message, user_id)
+    mine = await _surviving(user_id, repo, packs)
+    if not mine:
+        await message.answer("No packs yet. /newpack")
         return
 
-    active = await repo.active_for(user_id)
-    rows = [Text(p.title, " - ", PackManager.link(p.name)) for p in packs]
-    content = as_list(Bold("Your packs"), *rows, sep="\n")
-    await message.answer(**content.as_kwargs(), reply_markup=_keyboard(packs, active),
+    content, keyboard = _list_view(mine)
+    await message.answer(**content.as_kwargs(), reply_markup=keyboard,
                          link_preview_options={"is_disabled": True})
 
 
+async def _surviving(user_id: int, repo: PackRepo, packs: PackManager) -> list:
+    """Pair every pack still on Telegram with its size, forgetting the deleted ones."""
+    known = await repo.list_for(user_id)
+    sizes = await asyncio.gather(*(packs.size(p.name) for p in known))
+
+    active = await repo.active_for(user_id)
+    for pack, size in zip(known, sizes):
+        if size is None:
+            await repo.forget(user_id, pack.name)
+            if pack.name == active:
+                await repo.clear_active(user_id)
+    return [(pack, size) for pack, size in zip(known, sizes) if size is not None]
+
+
+def _list_view(mine: list) -> tuple[Text, InlineKeyboardMarkup]:
+    if not mine:
+        return Text("No packs yet. /newpack"), InlineKeyboardMarkup(inline_keyboard=[])
+
+    rows = []
+    buttons = []
+    for index, (pack, count) in enumerate(mine):
+        rows.append(Text("- ", TextLink(pack.title, url=PackManager.link(pack.name)),
+                         f" ({count})"))
+        buttons.append([InlineKeyboardButton(text=pack.title, callback_data=f"pack:open:{index}")])
+    return (as_list(Bold("Your packs"), *rows, sep="\n"),
+            InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+def _menu_view(pack, count: int, index: int, active: bool) -> tuple[Text, InlineKeyboardMarkup]:
+    fill = ("Stop adding", f"pack:stop:{index}") if active else ("Add stickers", f"pack:add:{index}")
+    buttons = [
+        [InlineKeyboardButton(text=fill[0], callback_data=fill[1])],
+        [InlineKeyboardButton(text="Edit stickers", callback_data=f"edit:list:{index}:0")],
+        [InlineKeyboardButton(text="Delete pack", callback_data=f"pack:drop:{index}")],
+        [InlineKeyboardButton(text="Back", callback_data="pack:back:0")],
+    ]
+    state = "\nSend files or stickers here. /done when finished." if active else ""
+    content = Text(TextLink(pack.title, url=PackManager.link(pack.name)), f" ({count}){state}")
+    return content, InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _confirm_view(pack, index: int) -> tuple[Text, InlineKeyboardMarkup]:
+    buttons = [[
+        InlineKeyboardButton(text="Delete", callback_data=f"pack:kill:{index}"),
+        InlineKeyboardButton(text="Keep", callback_data=f"pack:open:{index}"),
+    ]]
+    return Text("Delete ", pack.title, "?"), InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 @router.callback_query(lambda c: c.data and c.data.startswith("pack:"))
-async def switch_pack(callback: CallbackQuery, repo: PackRepo) -> None:
+async def pack_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager) -> None:
     assert callback.data and callback.from_user
     user_id = callback.from_user.id
-    choice = callback.data.split(":", 1)[1]
-
-    if choice == "off":
-        await repo.clear_active(user_id)
-        await callback.answer("Stopped adding to a pack")
-    else:
-        packs = await repo.list_for(user_id)
-        index = int(choice)
-        if index >= len(packs):
-            await callback.answer("That pack is gone")
-            return
-        await repo.set_active(user_id, packs[index].name)
-        await callback.answer(f"Now filling {packs[index].title}")
+    _, action, raw = callback.data.split(":")
+    index = int(raw)
 
     if isinstance(callback.message, Message):
-        packs = await repo.list_for(user_id)
-        active = await repo.active_for(user_id)
-        await callback.message.edit_reply_markup(reply_markup=_keyboard(packs, active))
+        await _drop_preview(callback.message, user_id)
+
+    mine = await _surviving(user_id, repo, packs)
+    if action != "back" and index >= len(mine):
+        await callback.answer("That pack is gone")
+        await _render(callback, *_list_view(mine))
+        return
+
+    if action == "add":
+        await repo.set_active(user_id, mine[index][0].name)
+        await repo.set_building(user_id, False)
+        await callback.answer()
+    elif action == "stop":
+        await repo.clear_active(user_id)
+        await callback.answer()
+    elif action == "kill":
+        pack = mine[index][0]
+        try:
+            await packs.remove(user_id, pack.name)
+        except Exception as exc:
+            log.warning("could not delete %s: %s", pack.name, exc)
+            await callback.answer("Could not delete it")
+            return
+        if pack.name == await repo.active_for(user_id):
+            await repo.clear_active(user_id)
+        await callback.answer("Deleted")
+        mine = [row for row in mine if row[0].name != pack.name]
+        await _render(callback, *_list_view(mine))
+        return
+    else:
+        await callback.answer()
+
+    if action == "drop":
+        await _render(callback, *_confirm_view(mine[index][0], index))
+        return
+    if action == "back":
+        await _render(callback, *_list_view(mine))
+        return
+
+    pack, count = mine[index]
+    active = pack.name == await repo.active_for(user_id)
+    await _render(callback, *_menu_view(pack, count, index, active))
+
+
+def _sticker_list_view(pack, entries: list, index: int) -> tuple[Text, InlineKeyboardMarkup]:
+    shown = entries[:MAX_PICKERS]
+    rows = [
+        [InlineKeyboardButton(text=f"{n + 1} {emoji}", callback_data=f"edit:pick:{index}:{n}")
+         for n, (_, emoji) in group]
+        for group in _chunks(list(enumerate(shown)), PICKERS_PER_ROW)
+    ]
+    rows.append([InlineKeyboardButton(text="Back", callback_data=f"pack:open:{index}")])
+    tail = f" First {MAX_PICKERS} shown." if len(entries) > MAX_PICKERS else ""
+    return (Text("Pick a sticker in ",
+                 TextLink(pack.title, url=PackManager.link(pack.name)), ".", tail),
+            InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+def _sticker_view(emoji: str, index: int, spot: int,
+                  waiting: bool = False) -> tuple[Text, InlineKeyboardMarkup]:
+    buttons = [
+        [InlineKeyboardButton(text="Change emoji", callback_data=f"edit:emoji:{index}:{spot}")],
+        [InlineKeyboardButton(text="Remove", callback_data=f"edit:drop:{index}:{spot}")],
+        [InlineKeyboardButton(text="Back", callback_data=f"edit:list:{index}:0")],
+    ]
+    ask = "\nSend a new emoji." if waiting else ""
+    return (Text(f"Sticker {spot + 1} - {emoji}{ask}"),
+            InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+async def _show_preview(message: Message, user_id: int, file_id: str) -> None:
+    await _drop_preview(message, user_id)
+    sent = await message.answer_sticker(file_id)
+    _PREVIEWS[user_id] = sent.message_id
+
+
+async def _drop_preview(message: Message, user_id: int) -> None:
+    """Take the previewed sticker out of the chat once the user leaves it."""
+    shown = _PREVIEWS.pop(user_id, None)
+    if shown is None:
+        return
+    try:
+        await message.bot.delete_message(message.chat.id, shown)
+    except TelegramBadRequest:
+        log.debug("preview %s was already gone", shown)
+
+
+def _chunks(items: list, size: int) -> list:
+    return [items[start:start + size] for start in range(0, len(items), size)]
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("edit:"))
+async def edit_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager) -> None:
+    assert callback.data and callback.from_user
+    user_id = callback.from_user.id
+    _, action, raw_pack, raw_spot = callback.data.split(":")
+    index, spot = int(raw_pack), int(raw_spot)
+
+    if isinstance(callback.message, Message):
+        await _drop_preview(callback.message, user_id)
+
+    mine = await _surviving(user_id, repo, packs)
+    if index >= len(mine):
+        await callback.answer("That pack is gone")
+        await _render(callback, *_list_view(mine))
+        return
+
+    pack = mine[index][0]
+    entries = await packs.stickers(pack.name)
+    if action != "list" and spot >= len(entries):
+        await callback.answer("That sticker is gone")
+        await _render(callback, *_sticker_list_view(pack, entries, index))
+        return
+
+    if action == "list":
+        await callback.answer()
+        await _render(callback, *_sticker_list_view(pack, entries, index))
+        return
+
+    file_id, emoji = entries[spot]
+
+    if action == "pick":
+        await callback.answer()
+        if isinstance(callback.message, Message):
+            await _show_preview(callback.message, user_id, file_id)
+        await _render(callback, *_sticker_view(emoji, index, spot))
+        return
+
+    if action == "emoji":
+        await repo.set_editing(user_id, file_id)
+        await callback.answer()
+        if isinstance(callback.message, Message):
+            await _show_preview(callback.message, user_id, file_id)
+        await _render(callback, *_sticker_view(emoji, index, spot, waiting=True))
+        return
+
+    try:
+        await packs.drop_sticker(file_id)
+    except Exception as exc:
+        log.warning("could not remove a sticker from %s: %s", pack.name, exc)
+        await callback.answer("Could not remove it")
+        return
+
+    await callback.answer("Removed")
+    entries = await packs.stickers(pack.name)
+    await _render(callback, *_sticker_list_view(pack, entries, index))
+
+
+async def _render(callback: CallbackQuery, content: Text, keyboard: InlineKeyboardMarkup) -> None:
+    if not isinstance(callback.message, Message):
+        return
+    try:
+        await callback.message.edit_text(**content.as_kwargs(), reply_markup=keyboard,
+                                         link_preview_options={"is_disabled": True})
+    except TelegramBadRequest as exc:
+        if "not modified" not in str(exc):
+            raise
 
 
 @router.message(Command("emoji"))
@@ -185,16 +472,16 @@ async def cmd_emoji(message: Message, command: CommandObject, repo: PackRepo) ->
     raw = (command.args or "").strip()
     if not raw:
         current = await repo.emoji_for(message.from_user.id)
-        await message.answer(f"Files without an emoji of their own get {current}. "
-                             f"Change it with /emoji and one emoji.")
+        await message.answer(f"Default emoji: {current}")
         return
 
     if not is_emoji(raw):
-        await message.answer("That is not an emoji. Send just the emoji, nothing else.")
+        await message.answer("Emoji only.")
         return
 
-    await repo.set_emoji(message.from_user.id, raw)
-    await message.answer(f"Files without an emoji of their own will get {raw}.")
+    emoji = "".join(split_emoji(raw))
+    await repo.set_emoji(message.from_user.id, emoji)
+    await message.answer(f"Default emoji: {emoji}")
 
 
 @router.message(Command("import"))
@@ -203,9 +490,7 @@ async def cmd_import(message: Message, command: CommandObject,
     assert message.from_user
     raw = (command.args or "").strip()
     if not raw:
-        content = Text("Send the pack link, for example ",
-                       Code("/import https://t.me/addstickers/mypack"))
-        await message.answer(**content.as_kwargs())
+        await message.answer("Send the pack link.")
         return
 
     source = set_name_from(raw)
@@ -217,10 +502,7 @@ async def cmd_import(message: Message, command: CommandObject,
         return
     except Exception:
         log.exception("import of %r failed", source)
-        await status.edit_text("Could not copy that pack.")
+        await status.edit_text("Could not copy it.")
         return
 
-    await status.edit_text(
-        f"Copied into your own pack: {PackManager.link(pack.name)}\n"
-        "It is active now, so every converted file goes into it."
-    )
+    await status.edit_text(f"Copied. {PackManager.link(pack.name)}")

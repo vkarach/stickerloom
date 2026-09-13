@@ -21,12 +21,12 @@ def test_unsupported_files_are_rejected(name):
 
 
 def test_tgs_gets_its_own_explanation():
-    with pytest.raises(UnsupportedInput, match="already usable"):
+    with pytest.raises(UnsupportedInput, match="already work"):
         _validate("pack.tgs", 1024)
 
 
 def test_oversized_source_is_rejected_before_download():
-    with pytest.raises(UnsupportedInput, match="download"):
+    with pytest.raises(UnsupportedInput, match="Too big"):
         _validate("big.mp4", MAX_SOURCE_BYTES + 1)
 
 

@@ -16,16 +16,16 @@ class CommandSpec:
 COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("start", "What this bot does"),
     CommandSpec("help", "Show all commands"),
-    CommandSpec("cancel", "Drop everything still queued"),
-    CommandSpec("newpack", "Start a pack, filled by the files you send", group="Packs"),
-    CommandSpec("done", "Finish the pack you are filling", group="Packs"),
-    CommandSpec("mypacks", "Your packs, and which one is being filled", group="Packs"),
-    CommandSpec("nopack", "Stop adding to a pack", group="Packs"),
-    CommandSpec("import", "Copy an existing pack so this bot can fill it", group="Packs"),
-    CommandSpec("emoji", "Emoji for files that carry none", group="Packs"),
+    CommandSpec("cancel", "Drop files still waiting to convert"),
+    CommandSpec("newpack", "Start a pack", group="Packs"),
+    CommandSpec("done", "Finish the pack", group="Packs"),
+    CommandSpec("mypacks", "Your packs", group="Packs"),
+    CommandSpec("nopack", "Stop filling a pack", group="Packs"),
+    CommandSpec("import", "Copy an existing pack here", group="Packs"),
+    CommandSpec("emoji", "Default emoji", group="Packs"),
 
-    CommandSpec("format", "The exact format the bot produces", group="Reference"),
-    CommandSpec("pack", "Building a pack by hand in @Stickers", group="Reference"),
+    CommandSpec("format", "What the output looks like", group="Reference"),
+    CommandSpec("pack", "Doing it by hand in @Stickers", group="Reference"),
 )
 
 BY_NAME: dict[str, CommandSpec] = {c.name: c for c in COMMANDS}

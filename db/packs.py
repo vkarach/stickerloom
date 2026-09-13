@@ -20,30 +20,48 @@ class PackRepo:
         "WHERE user_id = ? ORDER BY created_at, rowid"
     )
     _FIND = "SELECT user_id, name, title, created_at FROM packs WHERE user_id = ? AND name = ?"
+    _FORGET = "DELETE FROM packs WHERE user_id = ? AND name = ?"
 
     _SET_ACTIVE = "UPDATE users SET active_pack = ? WHERE user_id = ?"
     _GET_ACTIVE = "SELECT active_pack FROM users WHERE user_id = ?"
 
     _SET_PENDING = "UPDATE users SET pending_title = ? WHERE user_id = ?"
     _GET_PENDING = "SELECT pending_title FROM users WHERE user_id = ?"
-    _CLEAR_PENDING = "UPDATE users SET pending_title = NULL WHERE user_id = ?"
 
-    _SET_AWAITING = "UPDATE users SET awaiting_title = ? WHERE user_id = ?"
-    _GET_AWAITING = "SELECT awaiting_title FROM users WHERE user_id = ?"
+    _SET_ASKING = "UPDATE users SET asking = ? WHERE user_id = ?"
+    _GET_ASKING = "SELECT asking FROM users WHERE user_id = ?"
+
+    _SET_BUILDING = "UPDATE users SET building = ? WHERE user_id = ?"
+    _GET_BUILDING = "SELECT building FROM users WHERE user_id = ?"
+
+    _SET_EDITING = "UPDATE users SET editing = ? WHERE user_id = ?"
+    _GET_EDITING = "SELECT editing FROM users WHERE user_id = ?"
 
     _SET_EMOJI = "UPDATE users SET emoji = ? WHERE user_id = ?"
     _GET_EMOJI = "SELECT emoji FROM users WHERE user_id = ?"
 
     _PUSH_STICKER = (
-        "INSERT INTO queued_stickers (user_id, file_id, name, suggested, created_at) "
-        "VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO queued_stickers (user_id, file_id, name, suggested, source_msg, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)"
     )
+    _SET_PROMPT = "UPDATE queued_stickers SET prompt_msg = ? WHERE id = ?"
+    _ATTACH = "UPDATE queued_stickers SET file_id = ? WHERE id = ?"
     _HEAD_STICKER = (
-        "SELECT id, user_id, file_id, name, suggested FROM queued_stickers "
-        "WHERE user_id = ? ORDER BY id LIMIT 1"
+        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg "
+        "FROM queued_stickers "
+        "WHERE user_id = ? AND emoji IS NULL ORDER BY id LIMIT 1"
     )
+    _READY_STICKERS = (
+        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg "
+        "FROM queued_stickers "
+        "WHERE user_id = ? AND emoji IS NOT NULL ORDER BY id"
+    )
+    _NAME_STICKER = "UPDATE queued_stickers SET emoji = ? WHERE id = ?"
     _POP_STICKER = "DELETE FROM queued_stickers WHERE id = ?"
-    _COUNT_STICKERS = "SELECT COUNT(*) AS n FROM queued_stickers WHERE user_id = ?"
+    _COUNT_STICKERS = (
+        "SELECT COUNT(*) AS n FROM queued_stickers WHERE user_id = ? AND emoji IS NULL"
+    )
+    _COUNT_ALL = "SELECT COUNT(*) AS n FROM queued_stickers WHERE user_id = ?"
     _CLEAR_STICKERS = "DELETE FROM queued_stickers WHERE user_id = ?"
 
     def __init__(self, conn):
@@ -70,6 +88,11 @@ class PackRepo:
             row = await cursor.fetchone()
         return Pack(row["user_id"], row["name"], row["title"], row["created_at"]) if row else None
 
+    async def forget(self, user_id: int, name: str) -> None:
+        await self._conn.execute(self._FORGET, (user_id, name))
+        await self._conn.commit()
+        log.info("user %s no longer owns pack %s", user_id, name)
+
     async def set_active(self, user_id: int, name: str) -> None:
         await self._ensure(user_id)
         await self._conn.execute(self._SET_ACTIVE, (name, user_id))
@@ -95,36 +118,58 @@ class PackRepo:
             row = await cursor.fetchone()
         return row["pending_title"] if row else None
 
-    async def take_pending(self, user_id: int) -> str | None:
-        async with self._conn.execute(self._GET_PENDING, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-        title = row["pending_title"] if row else None
-        if title is not None:
-            await self._conn.execute(self._CLEAR_PENDING, (user_id,))
-            await self._conn.commit()
-        return title
-
-    async def set_awaiting_title(self, user_id: int, waiting: bool) -> None:
+    async def set_asking(self, user_id: int, kind: str | None) -> None:
+        """Remember what the next plain message answers: a pack name, or a link prefix."""
         await self._ensure(user_id)
-        await self._conn.execute(self._SET_AWAITING, (int(waiting), user_id))
+        await self._conn.execute(self._SET_ASKING, (kind, user_id))
         await self._conn.commit()
 
-    async def is_awaiting_title(self, user_id: int) -> bool:
-        async with self._conn.execute(self._GET_AWAITING, (user_id,)) as cursor:
+    async def asking_for(self, user_id: int) -> str | None:
+        async with self._conn.execute(self._GET_ASKING, (user_id,)) as cursor:
             row = await cursor.fetchone()
-        return bool(row["awaiting_title"]) if row else False
+        return row["asking"] if row else None
+
+    async def set_building(self, user_id: int, building: bool) -> None:
+        await self._ensure(user_id)
+        await self._conn.execute(self._SET_BUILDING, (int(building), user_id))
+        await self._conn.commit()
+
+    async def is_building(self, user_id: int) -> bool:
+        async with self._conn.execute(self._GET_BUILDING, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return bool(row["building"]) if row else False
+
+    async def set_editing(self, user_id: int, file_id: str | None) -> None:
+        await self._ensure(user_id)
+        await self._conn.execute(self._SET_EDITING, (file_id, user_id))
+        await self._conn.commit()
+
+    async def editing_for(self, user_id: int) -> str | None:
+        async with self._conn.execute(self._GET_EDITING, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return row["editing"] if row else None
 
     async def set_emoji(self, user_id: int, emoji: str) -> None:
         await self._ensure(user_id)
         await self._conn.execute(self._SET_EMOJI, (emoji, user_id))
         await self._conn.commit()
 
-    async def push_sticker(self, user_id: int, file_id: str, name: str,
-                           suggested: str | None) -> None:
+    async def push_sticker(self, user_id: int, file_id: str | None, name: str,
+                           suggested: str | None, source_msg: int | None = None) -> int:
+        """Reserve the sticker's place in the queue; file_id lands once it is converted."""
         created = datetime.now(timezone.utc).isoformat()
         await self._ensure(user_id)
-        await self._conn.execute(self._PUSH_STICKER,
-                                 (user_id, file_id, name, suggested, created))
+        cursor = await self._conn.execute(
+            self._PUSH_STICKER, (user_id, file_id, name, suggested, source_msg, created))
+        await self._conn.commit()
+        return cursor.lastrowid
+
+    async def attach(self, sticker_id: int, file_id: str) -> None:
+        await self._conn.execute(self._ATTACH, (file_id, sticker_id))
+        await self._conn.commit()
+
+    async def set_prompt(self, sticker_id: int, message_id: int) -> None:
+        await self._conn.execute(self._SET_PROMPT, (message_id, sticker_id))
         await self._conn.commit()
 
     async def head_sticker(self, user_id: int) -> QueuedSticker | None:
@@ -132,20 +177,32 @@ class PackRepo:
             row = await cursor.fetchone()
         if row is None:
             return None
-        return QueuedSticker(row["id"], row["user_id"], row["file_id"],
-                             row["name"], row["suggested"])
+        return _sticker(row)
+
+    async def ready_stickers(self, user_id: int) -> list[QueuedSticker]:
+        """Stickers already given an emoji, in the order they were sent."""
+        async with self._conn.execute(self._READY_STICKERS, (user_id,)) as cursor:
+            rows = await cursor.fetchall()
+        return [_sticker(row) for row in rows]
+
+    async def name_sticker(self, sticker_id: int, emoji: str) -> None:
+        await self._conn.execute(self._NAME_STICKER, (emoji, sticker_id))
+        await self._conn.commit()
 
     async def pop_sticker(self, sticker_id: int) -> None:
         await self._conn.execute(self._POP_STICKER, (sticker_id,))
         await self._conn.commit()
 
     async def count_stickers(self, user_id: int) -> int:
+        """How many stickers are still waiting for an emoji."""
         async with self._conn.execute(self._COUNT_STICKERS, (user_id,)) as cursor:
             row = await cursor.fetchone()
         return row["n"] if row else 0
 
     async def clear_stickers(self, user_id: int) -> int:
-        dropped = await self.count_stickers(user_id)
+        async with self._conn.execute(self._COUNT_ALL, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        dropped = row["n"] if row else 0
         await self._conn.execute(self._CLEAR_STICKERS, (user_id,))
         await self._conn.commit()
         return dropped
@@ -154,3 +211,9 @@ class PackRepo:
         async with self._conn.execute(self._GET_EMOJI, (user_id,)) as cursor:
             row = await cursor.fetchone()
         return (row["emoji"] if row else None) or DEFAULT_EMOJI
+
+
+def _sticker(row) -> QueuedSticker:
+    return QueuedSticker(row["id"], row["user_id"], row["file_id"], row["name"],
+                         row["suggested"], row["emoji"],
+                         row["source_msg"], row["prompt_msg"])

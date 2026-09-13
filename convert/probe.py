@@ -23,7 +23,7 @@ def parse_probe(payload: dict) -> MediaInfo:
     streams = payload.get("streams") or []
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
     if video is None:
-        raise ProbeFailed("No video or image stream in this file")
+        raise ProbeFailed("Could not read that file.")
 
     container = payload.get("format", {})
     width = int(video.get("width") or 0)
@@ -65,17 +65,17 @@ async def probe(path: Path) -> MediaInfo:
     stdout, stderr = await process.communicate()
     if process.returncode != 0:
         log.warning("ffprobe failed on %s: %s", path.name, stderr.decode(errors="replace").strip())
-        raise ProbeFailed("Could not read this file, it looks damaged or is not a media file")
+        raise ProbeFailed("Could not read that file.")
 
     try:
         info = parse_probe(json.loads(stdout))
     except json.JSONDecodeError as exc:
-        raise ProbeFailed("Could not read this file") from exc
+        raise ProbeFailed("Could not read that file.") from exc
 
     if info.needs_frame_expansion:
         return _inspect_with_pillow(path)
     if info.width <= 0 or info.height <= 0:
-        raise ProbeFailed("Could not read the dimensions of this file")
+        raise ProbeFailed("Could not read that file.")
     return info
 
 

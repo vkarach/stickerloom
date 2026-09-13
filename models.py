@@ -44,6 +44,9 @@ class QueuedSticker:
     file_id: str
     name: str
     suggested: str | None
+    emoji: str | None = None
+    source_msg: int | None = None
+    prompt_msg: int | None = None
 
 
 @dataclass

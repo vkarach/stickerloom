@@ -2,10 +2,10 @@
 
 import logging
 
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from db.packs import PackRepo
-from models import QueuedSticker
 from packs import PackError, PackManager
 
 log = logging.getLogger(__name__)
@@ -19,60 +19,67 @@ def prompt_keyboard(suggested: str) -> InlineKeyboardMarkup:
     ]])
 
 
-def prompt_text(sticker: QueuedSticker, waiting: int) -> str:
-    queued = f"\n{waiting - 1} more waiting." if waiting > 1 else ""
-    return f"Sticker accepted. Send the emoji for it.{queued}"
+def prompt_text(waiting: int) -> str:
+    queued = f" {waiting - 1} more." if waiting > 1 else ""
+    return f"Sticker accepted. Send an emoji.{queued}"
 
 
 async def ask_for_emoji(message: Message, user_id: int, repo: PackRepo) -> bool:
-    """Show the prompt for the sticker at the head of the queue, if there is one."""
+    """Ask about the sticker at the head of the queue, quoting the file it came from."""
     sticker = await repo.head_sticker(user_id)
-    if sticker is None:
+    if sticker is None or sticker.file_id is None or sticker.prompt_msg is not None:
         return False
 
     suggested = sticker.suggested or await repo.emoji_for(user_id)
     waiting = await repo.count_stickers(user_id)
-    await message.answer(prompt_text(sticker, waiting),
-                         reply_markup=prompt_keyboard(suggested))
+    text = prompt_text(waiting)
+    keyboard = prompt_keyboard(suggested)
+    try:
+        sent = await message.answer(text, reply_markup=keyboard,
+                                    reply_to_message_id=sticker.source_msg)
+    except TelegramBadRequest:
+        sent = await message.answer(text, reply_markup=keyboard)
+    await repo.set_prompt(sticker.id, sent.message_id)
     return True
 
 
 async def accept_emoji(message: Message, user_id: int, emoji: str,
                        repo: PackRepo, packs: PackManager) -> None:
-    """Put the waiting sticker into the pack, then move on to the next one."""
+    """Give the waiting sticker its emoji, then move on to the next one."""
     sticker = await repo.head_sticker(user_id)
     if sticker is None:
-        await message.answer("Nothing is waiting for an emoji. Send a file.")
+        await message.answer("Send a file first.")
         return
 
-    title = await repo.take_pending(user_id)
-    try:
-        if title:
-            pack = await packs.create(user_id, title, sticker.file_id, emoji)
-            await repo.pop_sticker(sticker.id)
-            await message.answer(
-                f"Sticker added! {pack.title} is live: {PackManager.link(pack.name)}\n"
-                "Send another file, or /done when you are finished.",
-                link_preview_options={"is_disabled": True},
-            )
-        else:
-            name = await repo.active_for(user_id)
-            if not name:
-                await message.answer("No pack is active. /newpack starts one.")
-                return
+    name = await repo.active_for(user_id)
+    if name:
+        # an existing pack takes stickers straight away, a new one is only built on /done
+        try:
             await packs.add(user_id, name, sticker.file_id, emoji)
-            await repo.pop_sticker(sticker.id)
-            await message.answer("Sticker added! Send another, or /done when you are finished.")
-    except PackError as exc:
-        if title:
-            await repo.set_pending(user_id, title)
-        await message.answer(str(exc))
-        return
-    except Exception:
-        log.exception("could not add a sticker for user %s", user_id)
-        if title:
-            await repo.set_pending(user_id, title)
-        await message.answer("Could not add that one. Send the emoji again to retry.")
-        return
+        except PackError as exc:
+            await message.answer(str(exc))
+            return
+        except Exception:
+            log.exception("could not add a sticker for user %s", user_id)
+            await message.answer("Failed. Send the emoji again.")
+            return
+        await repo.pop_sticker(sticker.id)
+    else:
+        await repo.name_sticker(sticker.id, emoji)
 
-    await ask_for_emoji(message, user_id, repo)
+    await _mark(message, sticker, emoji)
+    if await ask_for_emoji(message, user_id, repo):
+        return
+    if await repo.count_stickers(user_id) == 0:
+        await message.answer("Send another or /done.")
+
+
+async def _mark(message: Message, sticker, emoji: str) -> None:
+    """Leave the answered prompt showing which emoji it got."""
+    if sticker.prompt_msg is None:
+        return
+    try:
+        await message.bot.edit_message_text(f"{emoji} added.", chat_id=message.chat.id,
+                                            message_id=sticker.prompt_msg)
+    except TelegramBadRequest:
+        log.debug("prompt %s could not be marked", sticker.prompt_msg)

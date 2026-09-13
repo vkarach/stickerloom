@@ -25,10 +25,7 @@ router = Router()
 
 MEDIA = F.document | F.photo | F.sticker | F.animation | F.video | F.video_note
 
-TGS_HINT = (
-    "Animated Telegram stickers (.tgs) are already usable in a pack, "
-    "there is nothing to convert. Send a picture, GIF or video instead."
-)
+TGS_HINT = "Animated stickers already work in a pack, nothing to convert."
 
 
 class Source(NamedTuple):
@@ -70,12 +67,9 @@ def _validate(name: str, size: int) -> None:
         raise UnsupportedInput(TGS_HINT)
     if suffix not in SUPPORTED_EXTENSIONS:
         listed = ", ".join(sorted(SUPPORTED_EXTENSIONS))
-        raise UnsupportedInput(f"Cannot read {suffix or 'this file'}. Supported: {listed}")
+        raise UnsupportedInput(f"Cannot read {suffix or 'that'}. Supported: {listed}")
     if size > MAX_SOURCE_BYTES:
-        raise UnsupportedInput(
-            f"That file is {size // (1024 * 1024)} MB. "
-            f"Telegram only lets bots download up to {MAX_SOURCE_BYTES // (1024 * 1024)} MB."
-        )
+        raise UnsupportedInput(f"Too big, limit is {MAX_SOURCE_BYTES // (1024 * 1024)} MB.")
 
 
 def _caption(result: ConvertResult) -> str:
@@ -84,22 +78,21 @@ def _caption(result: ConvertResult) -> str:
 
 
 async def _in_pack_mode(user_id: int, repo: PackRepo) -> bool:
-    return bool(await repo.peek_pending(user_id) or await repo.active_for(user_id))
+    return bool(await repo.is_building(user_id) or await repo.active_for(user_id))
 
 
-async def _queue_for_pack(message: Message, user_id: int, name: str, result: ConvertResult,
-                          emoji: str | None, repo: PackRepo, packs: PackManager) -> None:
-    """Park the finished sticker on Telegram's servers and ask for its emoji."""
+async def _queue_for_pack(message: Message, user_id: int, spot: int, name: str,
+                          result: ConvertResult, repo: PackRepo, packs: PackManager) -> None:
+    """Fill in the reserved queue slot, then ask about it if it is the one in turn."""
     try:
         file_id = await packs.upload(user_id, result.path)
     except Exception:
         log.exception("could not upload %r for user %s", name, user_id)
-        await message.answer(f"{name}: converted, but Telegram would not take the file.")
-        return
-
-    await repo.push_sticker(user_id, file_id, name, emoji)
-    if await repo.count_stickers(user_id) == 1:
-        await ask_for_emoji(message, user_id, repo)
+        await repo.pop_sticker(spot)
+        await message.answer("Telegram rejected that file.")
+    else:
+        await repo.attach(spot, file_id)
+    await ask_for_emoji(message, user_id, repo)
 
 
 @router.message(MEDIA)
@@ -116,6 +109,10 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
         return
 
     name = source.name
+    # the slot is taken now, so a batch is asked about in the order it was sent
+    spot = None
+    if await _in_pack_mode(user_id, repo):
+        spot = await repo.push_sticker(user_id, None, name, source.emoji, message.message_id)
     status = await message.answer(f"{name}: queued")
 
     async def fetch(work_dir: Path) -> Path:
@@ -128,8 +125,8 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
 
     async def on_done(result: ConvertResult) -> None:
         await _delete(status)
-        if await _in_pack_mode(user_id, repo):
-            await _queue_for_pack(message, user_id, name, result, source.emoji, repo, packs)
+        if spot is not None:
+            await _queue_for_pack(message, user_id, spot, name, result, repo, packs)
             return
 
         document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
@@ -138,11 +135,14 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
             await message.answer(source.emoji)
 
     async def on_error(exc: Exception) -> None:
+        if spot is not None:
+            await repo.pop_sticker(spot)
+            await ask_for_emoji(message, user_id, repo)
         if isinstance(exc, StickerloomError):
             await _edit(status, f"{name}: {exc}")
             return
         log.exception("unexpected failure converting %r", name)
-        await _edit(status, f"{name}: something went wrong, try another file")
+        await _edit(status, f"{name}: something went wrong")
 
     position = await queue.submit(Job(
         key=user_id, name=name, fetch=fetch,
