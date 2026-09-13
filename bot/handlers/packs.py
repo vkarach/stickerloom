@@ -7,7 +7,8 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.formatting import Bold, Text, TextLink, as_list
 
-from bot.handlers.session import USE_SUGGESTED, accept_emoji, ask_for_emoji
+from bot.handlers.session import (ADD_ANYWAY, SKIP_DUPLICATE, USE_SUGGESTED,
+                                  accept_emoji, ask_for_emoji, resolve_duplicate)
 from db.packs import PackRepo
 from packs import PackError, PackManager
 from packs.emoji import is_emoji, split_emoji
@@ -87,6 +88,9 @@ async def _build_pack(message: Message, user_id: int, base: str,
         await repo.set_asking(user_id, "prefix")
         await message.answer("Failed. Send another prefix.")
         return
+
+    for sticker in stickers[:added]:
+        await repo.remember_sha(pack.name, sticker.sha)
 
     await repo.clear_stickers(user_id)
     await repo.set_pending(user_id, None)
@@ -172,6 +176,15 @@ async def use_suggested(callback: CallbackQuery, repo: PackRepo, packs: PackMana
     await callback.answer(emoji)
     if isinstance(callback.message, Message):
         await accept_emoji(callback.message, user_id, emoji, repo, packs)
+
+
+@router.callback_query(lambda c: c.data in (ADD_ANYWAY, SKIP_DUPLICATE))
+async def settle_duplicate(callback: CallbackQuery, repo: PackRepo, packs: PackManager) -> None:
+    assert callback.data and callback.from_user
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await resolve_duplicate(callback.message, callback.from_user.id,
+                                callback.data == ADD_ANYWAY, repo, packs)
 
 
 @router.message(F.text, ~F.text.startswith("/"))

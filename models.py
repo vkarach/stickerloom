@@ -47,6 +47,7 @@ class QueuedSticker:
     emoji: str | None = None
     source_msg: int | None = None
     prompt_msg: int | None = None
+    sha: str | None = None
 
 
 @dataclass

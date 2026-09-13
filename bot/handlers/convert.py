@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from pathlib import Path
 from typing import NamedTuple
@@ -94,8 +95,17 @@ async def _queue_for_pack(message: Message, user_id: int, spot: int, name: str,
         await repo.pop_sticker(spot)
         await message.answer("Telegram rejected that file.")
     else:
-        await repo.attach(spot, file_id)
+        await repo.attach(spot, file_id, _sha(result.path))
     await ask_for_emoji(message, user_id, repo)
+
+
+def _sha(path: Path) -> str:
+    """The only way to spot the same sticker twice: Telegram hands out no content hash."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 @router.message(MEDIA)

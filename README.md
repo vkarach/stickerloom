@@ -74,13 +74,14 @@ real ffmpeg that assert the output really matches the format table above.
 
 ## Building a pack
 
-`/newpack <title>` starts a pack. Telegram cannot hold an empty sticker set, so
-the pack is created together with the next file you send; every file after that
-is added to it. `/mypacks` lists your packs and switches between them, and
-`/emoji` sets the emoji used for files that carry none of
-their own.
+`/newpack` asks for a name, then takes files until `/done`, which asks for the
+link prefix and creates the whole set in one call. Every file is converted,
+parked, and shown as a reply to the message it came from, so a batch is answered
+in the order it was sent. `/mypacks` lists your packs; picking one opens a menu
+that adds stickers, edits a sticker emoji, removes a sticker or deletes the
+pack. `/emoji` sets the emoji used for files that carry none of their own.
 
-A pack built here is named `<slug>_<random>_by_<bot username>`, because Telegram
+A pack built here is named `<prefix>_by_<bot username>`, because Telegram
 requires that suffix. The running bot owns it, which has two consequences worth
 knowing:
 
@@ -90,8 +91,13 @@ knowing:
   included, and that copy can be filled forever after.
 - Packs made by the dev bot belong to the dev bot, not to the main one.
 
-A freshly created set rejects additions for a moment, so the first add after a
-create is retried with a short backoff.
+Telegram refuses writes to a set for a while after it is created - measured at
+19 seconds - so anything added past the first 50 stickers is retried for half a
+minute. `getStickerSet` keeps answering for deleted sets, so a pack is checked
+for life with a title write instead.
+
+The same file added twice is caught by a sha256 of the converted WebM, kept per
+pack, and answered with `Add anyway` or `Skip`.
 
 ### By hand instead
 

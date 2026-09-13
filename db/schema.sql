@@ -25,9 +25,17 @@ CREATE TABLE IF NOT EXISTS queued_stickers (
     name       TEXT NOT NULL,
     suggested  TEXT,
     emoji      TEXT,
+    sha        TEXT,
+    dup        INTEGER NOT NULL DEFAULT 0,
     source_msg INTEGER,
     prompt_msg INTEGER,
     created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_queued_owner ON queued_stickers(user_id, id);
+
+CREATE TABLE IF NOT EXISTS pack_stickers (
+    name TEXT NOT NULL,
+    sha  TEXT NOT NULL,
+    PRIMARY KEY (name, sha)
+);

@@ -15,6 +15,8 @@ _MIGRATIONS = (
     ("users", "building", "INTEGER NOT NULL DEFAULT 0"),
     ("users", "editing", "TEXT"),
     ("queued_stickers", "emoji", "TEXT"),
+    ("queued_stickers", "sha", "TEXT"),
+    ("queued_stickers", "dup", "INTEGER NOT NULL DEFAULT 0"),
     ("queued_stickers", "source_msg", "INTEGER"),
     ("queued_stickers", "prompt_msg", "INTEGER"),
 )

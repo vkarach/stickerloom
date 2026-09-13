@@ -45,18 +45,31 @@ class PackRepo:
         "VALUES (?, ?, ?, ?, ?, ?)"
     )
     _SET_PROMPT = "UPDATE queued_stickers SET prompt_msg = ? WHERE id = ?"
-    _ATTACH = "UPDATE queued_stickers SET file_id = ? WHERE id = ?"
+    _ATTACH = "UPDATE queued_stickers SET file_id = ?, sha = ? WHERE id = ?"
+
+    _REMEMBER_SHA = "INSERT INTO pack_stickers (name, sha) VALUES (?, ?) ON CONFLICT DO NOTHING"
+    _HAS_SHA = "SELECT 1 FROM pack_stickers WHERE name = ? AND sha = ?"
+    _QUEUED_SHAS = (
+        "SELECT sha FROM queued_stickers WHERE user_id = ? AND sha IS NOT NULL AND id <> ?"
+    )
+    _FORGET_SHAS = "DELETE FROM pack_stickers WHERE name = ?"
     _HEAD_STICKER = (
-        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg "
+        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha "
         "FROM queued_stickers "
         "WHERE user_id = ? AND emoji IS NULL ORDER BY id LIMIT 1"
     )
     _READY_STICKERS = (
-        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg "
+        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha "
         "FROM queued_stickers "
-        "WHERE user_id = ? AND emoji IS NOT NULL ORDER BY id"
+        "WHERE user_id = ? AND emoji IS NOT NULL AND dup = 0 ORDER BY id"
     )
     _NAME_STICKER = "UPDATE queued_stickers SET emoji = ? WHERE id = ?"
+    _MARK_DUP = "UPDATE queued_stickers SET emoji = ?, dup = 1 WHERE id = ?"
+    _CLEAR_DUP = "UPDATE queued_stickers SET dup = 0 WHERE id = ?"
+    _FIRST_DUP = (
+        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha "
+        "FROM queued_stickers WHERE user_id = ? AND dup = 1 ORDER BY id LIMIT 1"
+    )
     _POP_STICKER = "DELETE FROM queued_stickers WHERE id = ?"
     _COUNT_STICKERS = (
         "SELECT COUNT(*) AS n FROM queued_stickers WHERE user_id = ? AND emoji IS NULL"
@@ -90,6 +103,7 @@ class PackRepo:
 
     async def forget(self, user_id: int, name: str) -> None:
         await self._conn.execute(self._FORGET, (user_id, name))
+        await self._conn.execute(self._FORGET_SHAS, (name,))
         await self._conn.commit()
         log.info("user %s no longer owns pack %s", user_id, name)
 
@@ -164,9 +178,22 @@ class PackRepo:
         await self._conn.commit()
         return cursor.lastrowid
 
-    async def attach(self, sticker_id: int, file_id: str) -> None:
-        await self._conn.execute(self._ATTACH, (file_id, sticker_id))
+    async def attach(self, sticker_id: int, file_id: str, sha: str | None = None) -> None:
+        await self._conn.execute(self._ATTACH, (file_id, sha, sticker_id))
         await self._conn.commit()
+
+    async def remember_sha(self, name: str, sha: str | None) -> None:
+        if sha:
+            await self._conn.execute(self._REMEMBER_SHA, (name, sha))
+            await self._conn.commit()
+
+    async def has_sha(self, name: str, sha: str) -> bool:
+        async with self._conn.execute(self._HAS_SHA, (name, sha)) as cursor:
+            return await cursor.fetchone() is not None
+
+    async def queued_shas(self, user_id: int, besides: int) -> set:
+        async with self._conn.execute(self._QUEUED_SHAS, (user_id, besides)) as cursor:
+            return {row["sha"] for row in await cursor.fetchall()}
 
     async def set_prompt(self, sticker_id: int, message_id: int) -> None:
         await self._conn.execute(self._SET_PROMPT, (message_id, sticker_id))
@@ -184,6 +211,20 @@ class PackRepo:
         async with self._conn.execute(self._READY_STICKERS, (user_id,)) as cursor:
             rows = await cursor.fetchall()
         return [_sticker(row) for row in rows]
+
+    async def mark_duplicate(self, sticker_id: int, emoji: str) -> None:
+        """Hold the sticker aside with its emoji until the user says what to do with it."""
+        await self._conn.execute(self._MARK_DUP, (emoji, sticker_id))
+        await self._conn.commit()
+
+    async def first_duplicate(self, user_id: int) -> QueuedSticker | None:
+        async with self._conn.execute(self._FIRST_DUP, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return _sticker(row) if row else None
+
+    async def clear_duplicate(self, sticker_id: int) -> None:
+        await self._conn.execute(self._CLEAR_DUP, (sticker_id,))
+        await self._conn.commit()
 
     async def name_sticker(self, sticker_id: int, emoji: str) -> None:
         await self._conn.execute(self._NAME_STICKER, (emoji, sticker_id))
@@ -216,4 +257,4 @@ class PackRepo:
 def _sticker(row) -> QueuedSticker:
     return QueuedSticker(row["id"], row["user_id"], row["file_id"], row["name"],
                          row["suggested"], row["emoji"],
-                         row["source_msg"], row["prompt_msg"])
+                         row["source_msg"], row["prompt_msg"], row["sha"])

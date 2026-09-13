@@ -11,6 +11,24 @@ from packs import PackError, PackManager
 log = logging.getLogger(__name__)
 
 USE_SUGGESTED = "emoji:use"
+ADD_ANYWAY = "dup:add"
+SKIP_DUPLICATE = "dup:skip"
+
+
+def duplicate_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Add anyway", callback_data=ADD_ANYWAY),
+        InlineKeyboardButton(text="Skip", callback_data=SKIP_DUPLICATE),
+    ]])
+
+
+async def is_duplicate(user_id: int, sticker, name: str | None, repo: PackRepo) -> bool:
+    """The same file twice, either already in the pack or twice in this batch."""
+    if not sticker.sha:
+        return False
+    if name:
+        return await repo.has_sha(name, sticker.sha)
+    return sticker.sha in await repo.queued_shas(user_id, sticker.id)
 
 
 def prompt_keyboard(suggested: str) -> InlineKeyboardMarkup:
@@ -52,6 +70,11 @@ async def accept_emoji(message: Message, user_id: int, emoji: str,
         return
 
     name = await repo.active_for(user_id)
+    if await is_duplicate(user_id, sticker, name, repo):
+        await repo.mark_duplicate(sticker.id, emoji)
+        if not await _mark(message, sticker, "Already in this pack.", duplicate_keyboard()):
+            await message.answer("Already in this pack.", reply_markup=duplicate_keyboard())
+        return
     if name:
         # an existing pack takes stickers straight away, a new one is only built on /done
         try:
@@ -64,22 +87,58 @@ async def accept_emoji(message: Message, user_id: int, emoji: str,
             await message.answer("Failed. Send the emoji again.")
             return
         await repo.pop_sticker(sticker.id)
+        await repo.remember_sha(name, sticker.sha)
     else:
         await repo.name_sticker(sticker.id, emoji)
 
-    await _mark(message, sticker, emoji)
+    await _mark(message, sticker, f"{emoji} added.")
     if await ask_for_emoji(message, user_id, repo):
         return
     if await repo.count_stickers(user_id) == 0:
         await message.answer("Send another or /done.")
 
 
-async def _mark(message: Message, sticker, emoji: str) -> None:
-    """Leave the answered prompt showing which emoji it got."""
-    if sticker.prompt_msg is None:
+async def resolve_duplicate(message: Message, user_id: int, keep: bool,
+                            repo: PackRepo, packs: PackManager) -> None:
+    """Answer the Add anyway / Skip question about the sticker held aside."""
+    sticker = await repo.first_duplicate(user_id)
+    if sticker is None:
         return
+
+    if not keep:
+        await repo.pop_sticker(sticker.id)
+        await _mark(message, sticker, "Skipped.")
+    else:
+        name = await repo.active_for(user_id)
+        if name:
+            try:
+                await packs.add(user_id, name, sticker.file_id, sticker.emoji)
+            except Exception as exc:
+                log.warning("could not add a duplicate for user %s: %s", user_id, exc)
+                await message.answer("Failed. Send the emoji again.")
+                return
+            await repo.pop_sticker(sticker.id)
+            await repo.remember_sha(name, sticker.sha)
+        else:
+            await repo.clear_duplicate(sticker.id)
+        await _mark(message, sticker, f"{sticker.emoji} added.")
+
+    if await ask_for_emoji(message, user_id, repo):
+        return
+    if await repo.count_stickers(user_id) == 0:
+        await message.answer("Send another or /done.")
+
+
+async def _mark(message: Message, sticker, text: str,
+                keyboard: InlineKeyboardMarkup | None = None) -> bool:
+    """Leave the answered prompt showing what became of it."""
+    if sticker.prompt_msg is None:
+        return False
     try:
-        await message.bot.edit_message_text(f"{emoji} added.", chat_id=message.chat.id,
-                                            message_id=sticker.prompt_msg)
+        await message.bot.edit_message_text(text, chat_id=message.chat.id,
+                                            message_id=sticker.prompt_msg,
+                                            reply_markup=keyboard)
     except TelegramBadRequest:
         log.debug("prompt %s could not be marked", sticker.prompt_msg)
+        return False
+    return True
