@@ -2,7 +2,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from convert.decode import expand_frames
+from convert.decode import expand_frames, few_colors
 from convert.errors import CannotFitSizeLimit, EncodeFailed
 from convert.spec import FPS, MAX_BYTES, MAX_DURATION, STILL_DURATION, target_size
 from models import ConvertResult, MediaInfo
@@ -32,7 +32,8 @@ def output_duration(info: MediaInfo) -> float:
 
 
 def build_args(src: Path, dst: Path, info: MediaInfo, crf: int, fps: int,
-               sequence: tuple[str, float] | None = None) -> list[str]:
+               sequence: tuple[str, float] | None = None,
+               scaler: str = "lanczos") -> list[str]:
     width, height = target_size(info.width, info.height)
     duration = output_duration(info)
 
@@ -44,7 +45,7 @@ def build_args(src: Path, dst: Path, info: MediaInfo, crf: int, fps: int,
     else:
         source = ["-loop", "1", "-framerate", str(fps), "-i", str(src)]
 
-    chain = f"scale={width}:{height}:flags=lanczos,fps={fps},format=yuva420p"
+    chain = f"scale={width}:{height}:flags={scaler},fps={fps},format=yuva420p"
 
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
@@ -72,9 +73,10 @@ async def encode(src: Path, dst: Path, info: MediaInfo, work_dir: Path | None = 
         frames_dir = (work_dir or dst.parent) / "frames"
         sequence = expand_frames(src, frames_dir)
 
+    scaler = "neighbor" if few_colors(src) else "lanczos"
     smallest = None
     for attempt, (crf, fps) in enumerate(LADDER, start=1):
-        await _run(build_args(src, dst, info, crf, fps, sequence))
+        await _run(build_args(src, dst, info, crf, fps, sequence, scaler))
         size = dst.stat().st_size
         smallest = size if smallest is None else min(smallest, size)
         log.debug("%s: attempt %d crf=%d fps=%d -> %d bytes", src.name, attempt, crf, fps, size)

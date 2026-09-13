@@ -39,6 +39,9 @@ the Bot API will not let a bot download them.
 ffmpeg cannot decode animated WebP, so those are read through Pillow and
 expanded into frames before encoding.
 
+Scaling is lanczos, except for a drawn source whose first frame holds 64 colors
+or fewer: pixel art is scaled with nearest neighbour, which keeps its edges.
+
 ## Environment
 
 `.env` in the project root:

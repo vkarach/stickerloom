@@ -7,6 +7,10 @@ STILL_DURATION = 0.1
 FPS = 30
 MAX_BYTES = 256 * 1024
 
+# a flat palette means drawn art: scaling it smoothly turns crisp pixels into mush
+PIXEL_ART_COLORS = 64
+DRAWN_EXTENSIONS = frozenset({".png", ".gif", ".apng", ".webp"})
+
 # getFile refuses anything larger, so a bigger source can never be downloaded
 MAX_SOURCE_BYTES = 20 * 1024 * 1024
 

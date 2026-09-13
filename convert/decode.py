@@ -6,7 +6,7 @@ from pathlib import Path
 from PIL import Image, ImageSequence
 
 from convert.errors import ProbeFailed
-from convert.spec import FPS
+from convert.spec import DRAWN_EXTENSIONS, FPS, PIXEL_ART_COLORS
 
 log = logging.getLogger(__name__)
 
@@ -48,3 +48,15 @@ def _total_duration(image: Image.Image) -> float:
     for frame in ImageSequence.Iterator(image):
         total += frame.info.get("duration") or DEFAULT_FRAME_MS
     return total / 1000
+
+
+def few_colors(path: Path) -> bool:
+    """True when the first frame holds so few colors that it can only be drawn art."""
+    if path.suffix.lower() not in DRAWN_EXTENSIONS:
+        return False
+    try:
+        with Image.open(path) as image:
+            frame = image.convert("RGBA")
+    except OSError:
+        return False
+    return frame.getcolors(maxcolors=PIXEL_ART_COLORS) is not None
