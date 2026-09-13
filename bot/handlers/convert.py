@@ -30,6 +30,28 @@ MEDIA = F.document | F.photo | F.sticker | F.animation | F.video | F.video_note
 
 TGS_HINT = "Animated stickers already work in a pack, nothing to convert."
 
+# a file from the GIF panel arrives with a caption for a name, or with none
+BY_MIME = {
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+}
+
+
+def _named(file_name: str | None, mime: str | None, fallback: str) -> str:
+    """Name the file so its extension is one we know, whatever Telegram called it."""
+    suffix = Path(file_name or "").suffix.lower()
+    if suffix in SUPPORTED_EXTENSIONS or suffix in REJECTED_EXTENSIONS:
+        return file_name
+    known = BY_MIME.get(mime or "")
+    if not known:
+        return file_name or fallback
+    return Path(file_name or fallback).stem + known
+
 
 class Source(NamedTuple):
     file_id: str
@@ -42,7 +64,8 @@ def _source(message: Message) -> Source:
     """Pick the file to convert and name it, so the extension drives validation."""
     if message.document:
         doc = message.document
-        return Source(doc.file_id, doc.file_name or "file", doc.file_size or 0)
+        name = _named(doc.file_name, doc.mime_type, "file")
+        return Source(doc.file_id, name, doc.file_size or 0)
     if message.photo:
         photo = message.photo[-1]
         return Source(photo.file_id, "photo.jpg", photo.file_size or 0)
@@ -54,10 +77,12 @@ def _source(message: Message) -> Source:
         return Source(sticker.file_id, f"sticker{suffix}", sticker.file_size or 0, sticker.emoji)
     if message.animation:
         anim = message.animation
-        return Source(anim.file_id, anim.file_name or "animation.mp4", anim.file_size or 0)
+        name = _named(anim.file_name, anim.mime_type, "animation.mp4")
+        return Source(anim.file_id, name, anim.file_size or 0)
     if message.video:
         video = message.video
-        return Source(video.file_id, video.file_name or "video.mp4", video.file_size or 0)
+        name = _named(video.file_name, video.mime_type, "video.mp4")
+        return Source(video.file_id, name, video.file_size or 0)
     if message.video_note:
         note = message.video_note
         return Source(note.file_id, "video_note.mp4", note.file_size or 0)
