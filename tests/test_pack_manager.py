@@ -174,3 +174,39 @@ async def test_importing_an_empty_set_says_so(repo):
 
 def test_the_link_points_at_telegram():
     assert PackManager.link("cats_by_bot") == "https://t.me/addstickers/cats_by_bot"
+
+
+class FlakyBot(FakeBot):
+    """Fails the first add the way a freshly created set does, then succeeds."""
+
+    def __init__(self, failures):
+        super().__init__()
+        self.failures = failures
+
+    async def add_sticker_to_set(self, **kwargs):
+        self.calls.append(("add", kwargs))
+        if self.failures > 0:
+            self.failures -= 1
+            raise TelegramBadRequest(method="add", message="Bad Request: STICKERSET_INVALID")
+        return True
+
+
+async def test_a_set_that_is_not_ready_yet_is_retried(repo, sticker_file, monkeypatch):
+    monkeypatch.setattr("packs.manager.RETRY_DELAYS", (0.0, 0.0, 0.0))
+    bot = FlakyBot(failures=2)
+    await PackManager(bot, repo).add(ALICE, "cats_by_bot", sticker_file, "\U0001f600")
+    assert len([c for c in bot.calls if c[0] == "add"]) == 3
+
+
+async def test_retries_give_up_and_report_a_foreign_pack(repo, sticker_file, monkeypatch):
+    monkeypatch.setattr("packs.manager.RETRY_DELAYS", (0.0, 0.0, 0.0))
+    bot = FlakyBot(failures=99)
+    with pytest.raises(PackNotOurs):
+        await PackManager(bot, repo).add(ALICE, "someone_elses", sticker_file, "\U0001f600")
+
+
+async def test_a_full_pack_is_not_retried(repo, sticker_file):
+    bot = FakeBot(raises={"add": "Bad Request: STICKERSET_STICKERS_TOO_MUCH"})
+    with pytest.raises(PackFull):
+        await PackManager(bot, repo).add(ALICE, "cats_by_bot", sticker_file, "\U0001f600")
+    assert len([c for c in bot.calls if c[0] == "add"]) == 1

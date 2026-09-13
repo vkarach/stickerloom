@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from pathlib import Path
 
@@ -13,6 +14,9 @@ log = logging.getLogger(__name__)
 MAX_INITIAL = 50
 STICKER_FORMAT = "video"
 ADDSTICKERS_URL = "https://t.me/addstickers/"
+
+# a freshly created set rejects additions for a moment, so STICKERSET_INVALID is retried first
+RETRY_DELAYS = (0.0, 0.6, 1.5)
 
 
 class PackManager:
@@ -48,11 +52,23 @@ class PackManager:
         sticker = InputSticker(
             sticker=FSInputFile(path), format=STICKER_FORMAT, emoji_list=[emoji],
         )
-        try:
-            await self._bot.add_sticker_to_set(user_id=user_id, name=name, sticker=sticker)
-        except TelegramBadRequest as exc:
-            raise _translate(exc) from exc
+        await self._push(user_id, name, sticker)
         log.info("user %s added a sticker to %s", user_id, name)
+
+    async def _push(self, user_id: int, name: str, sticker: InputSticker) -> None:
+        last: TelegramBadRequest | None = None
+        for delay in RETRY_DELAYS:
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                await self._bot.add_sticker_to_set(user_id=user_id, name=name, sticker=sticker)
+                return
+            except TelegramBadRequest as exc:
+                last = exc
+                if "STICKERSET_INVALID" not in exc.message.upper():
+                    break
+                log.debug("%s not ready yet, retrying", name)
+        raise _translate(last) from last
 
     async def import_set(self, user_id: int, source_name: str, title: str) -> Pack:
         try:
@@ -80,13 +96,7 @@ class PackManager:
         await self._repo.set_active(user_id, name)
 
         for sticker in stickers[MAX_INITIAL:]:
-            try:
-                await self._bot.add_sticker_to_set(
-                    user_id=user_id, name=name, sticker=self._copy(sticker, fallback),
-                )
-            except TelegramBadRequest as exc:
-                log.warning("import stopped at %s stickers: %s", len(stickers), exc.message)
-                raise _translate(exc) from exc
+            await self._push(user_id, name, self._copy(sticker, fallback))
 
         log.info("user %s imported %s into %s", user_id, source_name, name)
         return pack
