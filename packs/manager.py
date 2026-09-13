@@ -8,7 +8,7 @@ from aiogram.types import FSInputFile, InputSticker
 from models import Pack
 from packs.emoji import MAX_EMOJI, split_emoji
 from packs.errors import NameTaken, PackFull, PackNotFound, PackNotOurs
-from packs.names import build_name, pack_name
+from packs.names import build_name
 
 log = logging.getLogger(__name__)
 
@@ -129,21 +129,26 @@ class PackManager:
                 log.debug("%s not ready yet, retrying", name)
         raise _translate(last) from last
 
-    async def import_set(self, user_id: int, source_name: str, title: str) -> Pack:
+    async def look_up(self, name: str):
+        """The source pack of an import, read before the user is asked anything."""
         try:
-            source = await self._bot.get_sticker_set(name=source_name)
+            return await self._bot.get_sticker_set(name=name)
         except TelegramBadRequest as exc:
-            raise PackNotFound(f"No pack called {source_name}.") from exc
+            raise PackNotFound(f"No pack called {name}.") from exc
 
+    async def import_set(self, user_id: int, source_name: str, base: str,
+                         title: str) -> tuple[Pack, int]:
+        source = await self.look_up(source_name)
         stickers = list(source.stickers or [])
         if not stickers:
             raise PackNotFound(f"{source_name} is empty.")
 
         fallback = await self._repo.emoji_for(user_id)
         me = await self._bot.me()
-        name = pack_name(title, me.username)
+        name = build_name(base, me.username)
 
-        first = [self._copy(s, fallback) for s in stickers[:MAX_INITIAL]]
+        fmt = _format_of(stickers[0])
+        first = [self._copy(s, fallback, fmt) for s in stickers[:MAX_INITIAL]]
         try:
             await self._bot.create_new_sticker_set(
                 user_id=user_id, name=name, title=title, stickers=first,
@@ -151,24 +156,35 @@ class PackManager:
         except TelegramBadRequest as exc:
             raise _translate(exc, creating=True) from exc
 
-        pack = await self._repo.remember(user_id, name, title)
-        await self._repo.set_active(user_id, name)
-
+        copied = len(first)
         for sticker in stickers[MAX_INITIAL:]:
-            await self._push(user_id, name, self._copy(sticker, fallback), fresh=True)
+            try:
+                await self._push(user_id, name, self._copy(sticker, fallback, fmt), fresh=True)
+                copied += 1
+            except Exception as exc:
+                log.warning("could not copy a sticker into %s: %s", name, exc)
 
-        log.info("user %s imported %s into %s", user_id, source_name, name)
-        return pack
+        log.info("user %s imported %s into %s, %d of %d", user_id, source_name, name,
+                 copied, len(stickers))
+        pack = await self._repo.remember(user_id, name, title)
+        return pack, copied
 
     @staticmethod
-    def _copy(sticker, fallback: str) -> InputSticker:
-        return _sticker(sticker.file_id, sticker.emoji or fallback)
+    def _copy(sticker, fallback: str, fmt: str) -> InputSticker:
+        return _sticker(sticker.file_id, sticker.emoji or fallback, fmt)
 
 
-def _sticker(source, emoji: str) -> InputSticker:
+def _sticker(source, emoji: str, fmt: str = STICKER_FORMAT) -> InputSticker:
     """Accepts a local path or a file_id already on Telegram's servers."""
     payload = FSInputFile(source) if isinstance(source, Path) else source
-    return InputSticker(sticker=payload, format=STICKER_FORMAT, emoji_list=_emoji_list(emoji))
+    return InputSticker(sticker=payload, format=fmt, emoji_list=_emoji_list(emoji))
+
+
+def _format_of(sticker) -> str:
+    """A set holds one kind of sticker, so the source decides what the copy is."""
+    if sticker.is_video:
+        return "video"
+    return "animated" if sticker.is_animated else "static"
 
 
 def _emoji_list(emoji: str) -> list[str]:

@@ -67,13 +67,15 @@ async def cmd_cancel(message: Message, queue: JobQueue, repo: PackRepo) -> None:
     converting = queue.cancel(user_id)
     waiting = await repo.clear_stickers(user_id)
     busy = bool(await repo.active_for(user_id) or await repo.is_building(user_id)
-                or await repo.asking_for(user_id) or await repo.editing_for(user_id))
+                or await repo.asking_for(user_id) or await repo.editing_for(user_id)
+                or await repo.importing_for(user_id))
 
     await repo.clear_active(user_id)
     await repo.set_building(user_id, False)
     await repo.set_pending(user_id, None)
     await repo.set_asking(user_id, None)
     await repo.set_editing(user_id, None)
+    await repo.set_importing(user_id, None)
     await drop_preview(message, user_id)
 
     if not (converting or waiting or busy):

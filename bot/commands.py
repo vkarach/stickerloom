@@ -20,7 +20,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("newpack", "Start a pack", group="Packs"),
     CommandSpec("done", "Finish the pack", group="Packs"),
     CommandSpec("mypacks", "Your packs", group="Packs"),
-    CommandSpec("import", "Copy an existing pack here", group="Packs"),
+    CommandSpec("import", "Copy someone's pack into your own", group="Packs"),
     CommandSpec("emoji", "Default emoji", group="Packs"),
 
     CommandSpec("format", "What the output looks like", group="Reference"),

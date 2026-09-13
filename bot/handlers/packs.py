@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 router = Router()
 
+KEEP_TITLE = "title:keep"
 MAX_PICKERS = 50
 PICKERS_PER_ROW = 5
 
@@ -36,9 +37,12 @@ def set_name_from(raw: str) -> str:
     return name.strip().strip("/")
 
 
-async def _ask_for_prefix(message: Message, user_id: int, repo: PackRepo) -> None:
+async def _ask_for_prefix(message: Message, user_id: int, repo: PackRepo,
+                          bot_name: str) -> None:
     await repo.set_asking(user_id, "prefix")
-    await message.answer("Pick a prefix for the link.")
+    shape = PackManager.link(build_name("<prefix>", bot_name))
+    await message.answer(f"Pick a prefix for the link.\n{shape}",
+                         link_preview_options={"is_disabled": True})
 
 
 async def _usable_prefix(message: Message, user_id: int, base: str, bot_name: str,
@@ -113,6 +117,7 @@ async def cmd_newpack(message: Message, command: CommandObject, bot: Bot,
     await repo.clear_active(user_id)
     await repo.set_pending(user_id, None)
     await repo.set_editing(user_id, None)
+    await repo.set_importing(user_id, None)
     await drop_preview(message, user_id)
     await repo.clear_stickers(user_id)
 
@@ -134,10 +139,12 @@ async def _start_collecting(message: Message, user_id: int, title: str,
 
 
 @router.message(Command("done"))
-async def cmd_done(message: Message, repo: PackRepo, packs: PackManager) -> None:
+async def cmd_done(message: Message, bot: Bot, repo: PackRepo,
+                   packs: PackManager) -> None:
     assert message.from_user
     user_id = message.from_user.id
     await repo.set_editing(user_id, None)
+    await repo.set_importing(user_id, None)
     await drop_preview(message, user_id)
     name = await repo.active_for(user_id)
 
@@ -160,7 +167,8 @@ async def cmd_done(message: Message, repo: PackRepo, packs: PackManager) -> None
         await message.answer("Nothing to finish.")
         return
 
-    await _ask_for_prefix(message, user_id, repo)
+    me = await bot.me()
+    await _ask_for_prefix(message, user_id, repo, me.username)
 
 
 @router.callback_query(lambda c: c.data == USE_SUGGESTED)
@@ -176,6 +184,18 @@ async def use_suggested(callback: CallbackQuery, repo: PackRepo, packs: PackMana
     await callback.answer(emoji)
     if isinstance(callback.message, Message):
         await accept_emoji(callback.message, user_id, emoji, repo, packs)
+
+
+@router.callback_query(lambda c: c.data == KEEP_TITLE)
+async def keep_title(callback: CallbackQuery, bot: Bot, repo: PackRepo) -> None:
+    assert callback.from_user
+    await callback.answer()
+    if not isinstance(callback.message, Message):
+        return
+    if callback.message.reply_markup:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    me = await bot.me()
+    await _ask_for_prefix(callback.message, callback.from_user.id, repo, me.username)
 
 
 @router.callback_query(lambda c: c.data in (ADD_ANYWAY, SKIP_DUPLICATE))
@@ -196,13 +216,26 @@ async def plain_text(message: Message, bot: Bot, repo: PackRepo, packs: PackMana
 
     asking = await repo.asking_for(user_id)
     if asking == "title":
+        if await repo.importing_for(user_id):
+            await repo.set_pending(user_id, text)
+            me = await bot.me()
+            await _ask_for_prefix(message, user_id, repo, me.username)
+            return
         await _start_collecting(message, user_id, text, repo)
+        return
+
+    if asking == "source":
+        await _take_source(message, user_id, text, repo, packs)
         return
 
     if asking == "prefix":
         me = await bot.me()
-        if await _usable_prefix(message, user_id, text, me.username, repo, packs):
-            await repo.set_asking(user_id, None)
+        if not await _usable_prefix(message, user_id, text, me.username, repo, packs):
+            return
+        await repo.set_asking(user_id, None)
+        if await repo.importing_for(user_id):
+            await _copy_pack(message, user_id, text, repo, packs)
+        else:
             await _build_pack(message, user_id, text, repo, packs)
         return
 
@@ -487,21 +520,65 @@ async def cmd_emoji(message: Message, command: CommandObject, repo: PackRepo) ->
 async def cmd_import(message: Message, command: CommandObject,
                      repo: PackRepo, packs: PackManager) -> None:
     assert message.from_user
+    user_id = message.from_user.id
     raw = (command.args or "").strip()
+
     if not raw:
-        await message.answer("Send the pack link.")
+        await repo.set_asking(user_id, "source")
+        await message.answer("Send the link of the pack to copy.")
         return
 
+    await _take_source(message, user_id, raw, repo, packs)
+
+
+async def _take_source(message: Message, user_id: int, raw: str,
+                       repo: PackRepo, packs: PackManager) -> None:
+    """Read the pack being copied now, so a bad link fails before anything else is asked."""
     source = set_name_from(raw)
-    status = await message.answer(f"Copying {source}...")
     try:
-        pack = await packs.import_set(message.from_user.id, source, source)
+        found = await packs.look_up(source)
     except PackError as exc:
+        await repo.set_asking(user_id, "source")
+        await message.answer(str(exc))
+        return
+
+    count = len(found.stickers or [])
+    if not count:
+        await repo.set_asking(user_id, "source")
+        await message.answer("That pack is empty.")
+        return
+
+    await repo.set_importing(user_id, source)
+    await repo.set_pending(user_id, found.title)
+    await repo.set_asking(user_id, "title")
+    keep = InlineKeyboardButton(text="Keep previous name", callback_data=KEEP_TITLE)
+    await message.answer(f"{found.title}, {count} stickers. Send a name for the pack.",
+                         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[keep]]))
+
+
+async def _copy_pack(message: Message, user_id: int, base: str,
+                     repo: PackRepo, packs: PackManager) -> None:
+    source = await repo.importing_for(user_id)
+    if not source:
+        await message.answer("Nothing to copy. /import")
+        return
+    title = await repo.peek_pending(user_id) or base
+    status = await message.answer(f"Copying {title}...")
+
+    try:
+        pack, copied = await packs.import_set(user_id, source, base, title)
+    except PackError as exc:
+        await repo.set_asking(user_id, "prefix")
         await status.edit_text(str(exc))
         return
     except Exception:
-        log.exception("import of %r failed", source)
-        await status.edit_text("Could not copy it.")
+        log.exception("import of %r failed for user %s", source, user_id)
+        await repo.set_asking(user_id, "prefix")
+        await status.edit_text("Failed. Send another prefix.")
         return
 
-    await status.edit_text(f"Copied. {PackManager.link(pack.name)}")
+    await repo.set_importing(user_id, None)
+    await repo.set_pending(user_id, None)
+    await repo.set_asking(user_id, None)
+    await status.edit_text(f"Copied {copied}. {PackManager.link(pack.name)}",
+                           link_preview_options={"is_disabled": True})

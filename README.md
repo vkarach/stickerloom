@@ -87,8 +87,10 @@ knowing:
 
 - **A pack created in @Stickers can never be filled by this bot.**
   `addStickerToSet` answers `STICKERSET_INVALID` for any set the bot did not
-  create. `/import <link>` copies such a pack into one this bot owns, emoji
-  included, and that copy can be filled forever after.
+  create. `/import` copies such a pack into one this bot owns, emoji included,
+  and that copy can be filled forever after. It reads the source first, reports
+  its title and size, asks for a link prefix like `/newpack` does, and says how
+  many stickers made it across.
 - Packs made by the dev bot belong to the dev bot, not to the main one.
 
 Telegram refuses writes to a set for a while after it is created - measured at

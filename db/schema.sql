@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS users (
     emoji          TEXT,
     asking         TEXT,
     building       INTEGER NOT NULL DEFAULT 0,
-    editing        TEXT
+    editing        TEXT,
+    importing      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS packs (

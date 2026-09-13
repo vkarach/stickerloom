@@ -34,6 +34,9 @@ class PackRepo:
     _SET_BUILDING = "UPDATE users SET building = ? WHERE user_id = ?"
     _GET_BUILDING = "SELECT building FROM users WHERE user_id = ?"
 
+    _SET_IMPORTING = "UPDATE users SET importing = ? WHERE user_id = ?"
+    _GET_IMPORTING = "SELECT importing FROM users WHERE user_id = ?"
+
     _SET_EDITING = "UPDATE users SET editing = ? WHERE user_id = ?"
     _GET_EDITING = "SELECT editing FROM users WHERE user_id = ?"
 
@@ -152,6 +155,16 @@ class PackRepo:
         async with self._conn.execute(self._GET_BUILDING, (user_id,)) as cursor:
             row = await cursor.fetchone()
         return bool(row["building"]) if row else False
+
+    async def set_importing(self, user_id: int, source: str | None) -> None:
+        await self._ensure(user_id)
+        await self._conn.execute(self._SET_IMPORTING, (source, user_id))
+        await self._conn.commit()
+
+    async def importing_for(self, user_id: int) -> str | None:
+        async with self._conn.execute(self._GET_IMPORTING, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return row["importing"] if row else None
 
     async def set_editing(self, user_id: int, file_id: str | None) -> None:
         await self._ensure(user_id)
