@@ -72,12 +72,31 @@ real ffmpeg that assert the output really matches the format table above.
 - `/format` - the exact output format
 - `/pack` - how to load the files into a pack
 
-## Building the pack
+## Building a pack
+
+`/newpack <title>` starts a pack. Telegram cannot hold an empty sticker set, so
+the pack is created together with the next file you send; every file after that
+is added to it. `/mypacks` lists your packs and switches between them, `/nopack`
+stops adding, and `/emoji` sets the emoji used for files that carry none of
+their own.
+
+A pack built here is named `<slug>_<random>_by_<bot username>`, because Telegram
+requires that suffix. The running bot owns it, which has two consequences worth
+knowing:
+
+- **A pack created in @Stickers can never be filled by this bot.**
+  `addStickerToSet` answers `STICKERSET_INVALID` for any set the bot did not
+  create. `/import <link>` copies such a pack into one this bot owns, emoji
+  included, and that copy can be filled forever after.
+- Packs made by the dev bot belong to the dev bot, not to the main one.
+
+A freshly created set rejects additions for a moment, so the first add after a
+create is retried with a short backoff.
+
+### By hand instead
 
 Open @Stickers, send `/newpack` (or `/addsticker`), choose **video sticker**,
 then forward the files this bot produced **as files, not as videos**. Sending
 them as video lets Telegram re-encode them and @Stickers then refuses the
-result.
-
-When the source was a sticker, its emoji comes back as a second message, because
-@Stickers asks for one right after the file.
+result. When the source was a sticker, its emoji comes back as a second message,
+because @Stickers asks for one right after the file.

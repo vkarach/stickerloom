@@ -12,9 +12,10 @@ router = Router()
 START = Text(
     Bold("Stickerloom"), "\n\n",
     "Send a picture, sticker, GIF or short video. You get back a ",
-    Code(".webm"), " that @Stickers accepts as a video sticker.\n\n",
-    "Drop as many files as you like, they are converted in order. "
-    "/format for the details, /pack for what to do with the result.",
+    Code(".webm"), " shaped exactly the way a video sticker has to be.\n\n",
+    "To build a pack without leaving this chat, run /newpack and keep sending files. "
+    "Already have a pack made in @Stickers? /import copies it here.\n\n",
+    "/format for the output details, /pack for the manual @Stickers route.",
 )
 
 FORMAT = as_marked_section(
@@ -28,13 +29,14 @@ FORMAT = as_marked_section(
 )
 
 PACK = as_list(
-    Bold("Putting the files into a pack"),
+    Bold("Building a pack by hand"),
+    Text("This bot can do it for you with /newpack. Do it yourself like this:"),
     Text("1. Open @Stickers and send /newpack, or /addsticker for an existing one."),
     Text("2. Pick ", Bold("video sticker"), " when it asks for the type."),
     Text("3. Forward the files this bot sent you, as files, not as videos."),
     Text("4. Send an emoji for each one."),
-    Text("\nStatic and video stickers can live in the same video pack, "
-         "which is the whole point of converting the still ones."),
+    Text("\nA pack made in @Stickers cannot be filled by this bot afterwards, "
+         "Telegram only lets a bot touch packs it created itself. /import copies one over."),
     sep="\n",
 )
 
