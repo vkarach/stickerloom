@@ -16,11 +16,10 @@ class CommandSpec:
 COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("start", "What this bot does"),
     CommandSpec("help", "Show all commands"),
-    CommandSpec("cancel", "Drop files still waiting to convert"),
+    CommandSpec("cancel", "Stop whatever is in progress"),
     CommandSpec("newpack", "Start a pack", group="Packs"),
     CommandSpec("done", "Finish the pack", group="Packs"),
     CommandSpec("mypacks", "Your packs", group="Packs"),
-    CommandSpec("nopack", "Stop filling a pack", group="Packs"),
     CommandSpec("import", "Copy an existing pack here", group="Packs"),
     CommandSpec("emoji", "Default emoji", group="Packs"),
 

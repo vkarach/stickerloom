@@ -109,7 +109,7 @@ async def cmd_newpack(message: Message, command: CommandObject, bot: Bot,
     await repo.clear_active(user_id)
     await repo.set_pending(user_id, None)
     await repo.set_editing(user_id, None)
-    await _drop_preview(message, user_id)
+    await drop_preview(message, user_id)
     await repo.clear_stickers(user_id)
 
     if not title:
@@ -128,27 +128,12 @@ async def _start_collecting(message: Message, user_id: int, title: str,
     await message.answer("Send files or stickers. /done to finish.")
 
 
-@router.message(Command("nopack"))
-async def cmd_nopack(message: Message, repo: PackRepo) -> None:
-    assert message.from_user
-    user_id = message.from_user.id
-    await repo.clear_active(user_id)
-    await repo.set_pending(user_id, None)
-    await repo.set_asking(user_id, None)
-    await repo.set_building(user_id, False)
-    await repo.set_editing(user_id, None)
-    await _drop_preview(message, user_id)
-    dropped = await repo.clear_stickers(user_id)
-    extra = f" {dropped} dropped." if dropped else ""
-    await message.answer(f"Stopped.{extra}")
-
-
 @router.message(Command("done"))
 async def cmd_done(message: Message, repo: PackRepo, packs: PackManager) -> None:
     assert message.from_user
     user_id = message.from_user.id
     await repo.set_editing(user_id, None)
-    await _drop_preview(message, user_id)
+    await drop_preview(message, user_id)
     name = await repo.active_for(user_id)
 
     if name:
@@ -220,7 +205,7 @@ async def plain_text(message: Message, bot: Bot, repo: PackRepo, packs: PackMana
             await message.answer("Could not change it.")
             return
         await repo.set_editing(user_id, None)
-        await _drop_preview(message, user_id)
+        await drop_preview(message, user_id)
         await message.answer(f"Emoji is now {text}.")
         return
 
@@ -239,7 +224,7 @@ async def cmd_mypacks(message: Message, repo: PackRepo, packs: PackManager) -> N
     assert message.from_user
     user_id = message.from_user.id
     await repo.set_editing(user_id, None)
-    await _drop_preview(message, user_id)
+    await drop_preview(message, user_id)
     mine = await _surviving(user_id, repo, packs)
     if not mine:
         await message.answer("No packs yet. /newpack")
@@ -307,7 +292,7 @@ async def pack_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager)
     index = int(raw)
 
     if isinstance(callback.message, Message):
-        await _drop_preview(callback.message, user_id)
+        await drop_preview(callback.message, user_id)
 
     mine = await _surviving(user_id, repo, packs)
     if action != "back" and index >= len(mine):
@@ -378,12 +363,12 @@ def _sticker_view(emoji: str, index: int, spot: int,
 
 
 async def _show_preview(message: Message, user_id: int, file_id: str) -> None:
-    await _drop_preview(message, user_id)
+    await drop_preview(message, user_id)
     sent = await message.answer_sticker(file_id)
     _PREVIEWS[user_id] = sent.message_id
 
 
-async def _drop_preview(message: Message, user_id: int) -> None:
+async def drop_preview(message: Message, user_id: int) -> None:
     """Take the previewed sticker out of the chat once the user leaves it."""
     shown = _PREVIEWS.pop(user_id, None)
     if shown is None:
@@ -406,7 +391,7 @@ async def edit_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager)
     index, spot = int(raw_pack), int(raw_spot)
 
     if isinstance(callback.message, Message):
-        await _drop_preview(callback.message, user_id)
+        await drop_preview(callback.message, user_id)
 
     mine = await _surviving(user_id, repo, packs)
     if index >= len(mine):

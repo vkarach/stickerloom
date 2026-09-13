@@ -68,7 +68,7 @@ real ffmpeg that assert the output really matches the format table above.
 
 - `/start` - what the bot does
 - `/help` - all commands
-- `/cancel` - drop everything still queued
+- `/cancel` - stop whatever is in progress
 - `/format` - the exact output format
 - `/pack` - how to load the files into a pack
 
@@ -76,8 +76,8 @@ real ffmpeg that assert the output really matches the format table above.
 
 `/newpack <title>` starts a pack. Telegram cannot hold an empty sticker set, so
 the pack is created together with the next file you send; every file after that
-is added to it. `/mypacks` lists your packs and switches between them, `/nopack`
-stops adding, and `/emoji` sets the emoji used for files that carry none of
+is added to it. `/mypacks` lists your packs and switches between them, and
+`/emoji` sets the emoji used for files that carry none of
 their own.
 
 A pack built here is named `<slug>_<random>_by_<bot username>`, because Telegram

@@ -4,6 +4,8 @@ from aiogram.types import Message
 from aiogram.utils.formatting import Bold, Text, as_list, as_marked_section
 
 from bot.commands import help_content
+from bot.handlers.packs import drop_preview
+from db.packs import PackRepo
 from convert.queue import JobQueue
 from convert.spec import FPS, LONG_SIDE, MAX_BYTES, MAX_DURATION
 
@@ -57,10 +59,25 @@ async def cmd_pack(message: Message) -> None:
 
 
 @router.message(Command("cancel"))
-async def cmd_cancel(message: Message, queue: JobQueue) -> None:
+async def cmd_cancel(message: Message, queue: JobQueue, repo: PackRepo) -> None:
+    """One stop button: the convert queue, the pack being built and the sticker editor."""
     assert message.from_user
-    dropped = queue.cancel(message.from_user.id)
-    if not dropped:
-        await message.answer("Nothing queued.")
+    user_id = message.from_user.id
+
+    converting = queue.cancel(user_id)
+    waiting = await repo.clear_stickers(user_id)
+    busy = bool(await repo.active_for(user_id) or await repo.is_building(user_id)
+                or await repo.asking_for(user_id) or await repo.editing_for(user_id))
+
+    await repo.clear_active(user_id)
+    await repo.set_building(user_id, False)
+    await repo.set_pending(user_id, None)
+    await repo.set_asking(user_id, None)
+    await repo.set_editing(user_id, None)
+    await drop_preview(message, user_id)
+
+    if not (converting or waiting or busy):
+        await message.answer("Nothing to cancel.")
         return
-    await message.answer(f"Dropped {dropped} queued.")
+    dropped = f" {converting + waiting} dropped." if converting + waiting else ""
+    await message.answer(f"Cancelled.{dropped}")
