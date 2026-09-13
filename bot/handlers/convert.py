@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from typing import NamedTuple
 
 from aiogram import Bot, F, Router
 from aiogram.types import FSInputFile, Message
@@ -26,29 +27,36 @@ TGS_HINT = (
 )
 
 
-def _source(message: Message) -> tuple[str, str, int]:
+class Source(NamedTuple):
+    file_id: str
+    name: str
+    size: int
+    emoji: str | None = None
+
+
+def _source(message: Message) -> Source:
     """Pick the file to convert and name it, so the extension drives validation."""
     if message.document:
         doc = message.document
-        return doc.file_id, doc.file_name or "file", doc.file_size or 0
+        return Source(doc.file_id, doc.file_name or "file", doc.file_size or 0)
     if message.photo:
         photo = message.photo[-1]
-        return photo.file_id, "photo.jpg", photo.file_size or 0
+        return Source(photo.file_id, "photo.jpg", photo.file_size or 0)
     if message.sticker:
         sticker = message.sticker
         if sticker.is_animated:
             raise UnsupportedInput(TGS_HINT)
         suffix = ".webm" if sticker.is_video else ".webp"
-        return sticker.file_id, f"sticker{suffix}", sticker.file_size or 0
+        return Source(sticker.file_id, f"sticker{suffix}", sticker.file_size or 0, sticker.emoji)
     if message.animation:
         anim = message.animation
-        return anim.file_id, anim.file_name or "animation.mp4", anim.file_size or 0
+        return Source(anim.file_id, anim.file_name or "animation.mp4", anim.file_size or 0)
     if message.video:
         video = message.video
-        return video.file_id, video.file_name or "video.mp4", video.file_size or 0
+        return Source(video.file_id, video.file_name or "video.mp4", video.file_size or 0)
     if message.video_note:
         note = message.video_note
-        return note.file_id, "video_note.mp4", note.file_size or 0
+        return Source(note.file_id, "video_note.mp4", note.file_size or 0)
     raise UnsupportedInput("Send a picture, sticker, GIF or short video.")
 
 
@@ -77,17 +85,18 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue) -> None:
     user_id = message.from_user.id
 
     try:
-        file_id, name, size = _source(message)
-        _validate(name, size)
+        source = _source(message)
+        _validate(source.name, source.size)
     except StickerloomError as exc:
         await message.answer(str(exc))
         return
 
+    name = source.name
     status = await message.answer(f"{name}: queued")
 
     async def fetch(work_dir: Path) -> Path:
         target = work_dir / name
-        await bot.download(file_id, destination=target)
+        await bot.download(source.file_id, destination=target)
         return target
 
     async def on_status(_: str) -> None:
@@ -96,6 +105,8 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue) -> None:
     async def on_done(result: ConvertResult) -> None:
         document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
         await message.answer_document(document, caption=_caption(result))
+        if source.emoji:
+            await message.answer(source.emoji)
         await _delete(status)
 
     async def on_error(exc: Exception) -> None:
