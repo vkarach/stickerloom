@@ -89,3 +89,39 @@ async def test_packs_come_back_newest_last(repo):
     for index in range(3):
         await repo.remember(ALICE, f"p{index}_by_bot", f"Pack {index}")
     assert [p.name for p in await repo.list_for(ALICE)] == ["p0_by_bot", "p1_by_bot", "p2_by_bot"]
+
+
+async def test_the_awaiting_title_flag_round_trips(repo):
+    assert await repo.is_awaiting_title(ALICE) is False
+    await repo.set_awaiting_title(ALICE, True)
+    assert await repo.is_awaiting_title(ALICE) is True
+    await repo.set_awaiting_title(ALICE, False)
+    assert await repo.is_awaiting_title(ALICE) is False
+
+
+async def test_the_flag_is_per_user(repo):
+    await repo.set_awaiting_title(ALICE, True)
+    assert await repo.is_awaiting_title(BOB) is False
+
+
+async def test_an_older_database_gains_the_new_column(tmp_path, monkeypatch):
+    import aiosqlite
+
+    path = tmp_path / "old.db"
+    async with aiosqlite.connect(path) as old:
+        await old.execute(
+            "CREATE TABLE users (user_id INTEGER PRIMARY KEY, active_pack TEXT, "
+            "pending_title TEXT, emoji TEXT)"
+        )
+        await old.execute("INSERT INTO users (user_id, emoji) VALUES (1, '\U0001f525')")
+        await old.commit()
+
+    monkeypatch.setattr("db.connection.DB_PATH", path)
+    monkeypatch.setattr("db.connection.DB_DIR", tmp_path)
+    conn = await connect()
+    try:
+        migrated = PackRepo(conn)
+        assert await migrated.is_awaiting_title(1) is False
+        assert await migrated.emoji_for(1) == "\U0001f525"
+    finally:
+        await conn.close()

@@ -28,6 +28,9 @@ class PackRepo:
     _GET_PENDING = "SELECT pending_title FROM users WHERE user_id = ?"
     _CLEAR_PENDING = "UPDATE users SET pending_title = NULL WHERE user_id = ?"
 
+    _SET_AWAITING = "UPDATE users SET awaiting_title = ? WHERE user_id = ?"
+    _GET_AWAITING = "SELECT awaiting_title FROM users WHERE user_id = ?"
+
     _SET_EMOJI = "UPDATE users SET emoji = ? WHERE user_id = ?"
     _GET_EMOJI = "SELECT emoji FROM users WHERE user_id = ?"
 
@@ -100,6 +103,16 @@ class PackRepo:
             await self._conn.execute(self._CLEAR_PENDING, (user_id,))
             await self._conn.commit()
         return title
+
+    async def set_awaiting_title(self, user_id: int, waiting: bool) -> None:
+        await self._ensure(user_id)
+        await self._conn.execute(self._SET_AWAITING, (int(waiting), user_id))
+        await self._conn.commit()
+
+    async def is_awaiting_title(self, user_id: int) -> bool:
+        async with self._conn.execute(self._GET_AWAITING, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return bool(row["awaiting_title"]) if row else False
 
     async def set_emoji(self, user_id: int, emoji: str) -> None:
         await self._ensure(user_id)

@@ -1,8 +1,9 @@
 CREATE TABLE IF NOT EXISTS users (
-    user_id       INTEGER PRIMARY KEY,
-    active_pack   TEXT,
-    pending_title TEXT,
-    emoji         TEXT
+    user_id        INTEGER PRIMARY KEY,
+    active_pack    TEXT,
+    pending_title  TEXT,
+    emoji          TEXT,
+    awaiting_title INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS packs (

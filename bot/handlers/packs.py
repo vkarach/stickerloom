@@ -38,21 +38,31 @@ def _keyboard(packs, active: str | None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.message(Command("newpack"))
-async def cmd_newpack(message: Message, command: CommandObject, repo: PackRepo) -> None:
-    assert message.from_user
-    title = (command.args or "").strip()
-    if not title:
-        content = Text("Give the pack a title, for example ", Code("/newpack Tiktok comments"))
-        await message.answer(**content.as_kwargs())
-        return
+MAX_TITLE = 64
 
-    await repo.set_pending(message.from_user.id, title)
+
+async def _start_pack(message: Message, user_id: int, title: str, repo: PackRepo) -> None:
+    await repo.set_awaiting_title(user_id, False)
+    await repo.set_pending(user_id, title)
     content = Text(
         "Next file you send becomes the first sticker of ", Bold(title), ".\n",
         "Telegram cannot make an empty pack, so it is created together with that file.",
     )
     await message.answer(**content.as_kwargs())
+
+
+@router.message(Command("newpack"))
+async def cmd_newpack(message: Message, command: CommandObject, repo: PackRepo) -> None:
+    assert message.from_user
+    user_id = message.from_user.id
+    title = (command.args or "").strip()
+
+    if not title:
+        await repo.set_awaiting_title(user_id, True)
+        await message.answer("What should the pack be called?")
+        return
+
+    await _start_pack(message, user_id, title, repo)
 
 
 @router.message(Command("nopack"))
@@ -61,6 +71,7 @@ async def cmd_nopack(message: Message, repo: PackRepo) -> None:
     user_id = message.from_user.id
     await repo.clear_active(user_id)
     await repo.set_pending(user_id, None)
+    await repo.set_awaiting_title(user_id, False)
     dropped = await repo.clear_stickers(user_id)
     extra = f" Dropped {dropped} waiting for an emoji." if dropped else ""
     await message.answer(f"Stopped. Files come back converted and go nowhere else.{extra}")
@@ -73,6 +84,7 @@ async def cmd_done(message: Message, repo: PackRepo) -> None:
     name = await repo.active_for(user_id)
     dropped = await repo.clear_stickers(user_id)
     await repo.set_pending(user_id, None)
+    await repo.set_awaiting_title(user_id, False)
     await repo.clear_active(user_id)
 
     if not name:
@@ -104,17 +116,27 @@ async def use_suggested(callback: CallbackQuery, repo: PackRepo, packs: PackMana
 
 
 @router.message(F.text, ~F.text.startswith("/"))
-async def emoji_reply(message: Message, repo: PackRepo, packs: PackManager) -> None:
+async def plain_text(message: Message, repo: PackRepo, packs: PackManager) -> None:
+    """Plain text answers whatever the bot last asked for: a title, or an emoji."""
     assert message.from_user and message.text
     user_id = message.from_user.id
+    text = message.text.strip()
+
+    if await repo.is_awaiting_title(user_id):
+        if len(text) > MAX_TITLE:
+            await message.answer(f"Too long, keep it under {MAX_TITLE} characters.")
+            return
+        await _start_pack(message, user_id, text, repo)
+        return
+
     if await repo.head_sticker(user_id) is None:
         return
 
-    if not is_emoji(message.text):
+    if not is_emoji(text):
         await message.answer("Send just the emoji, or tap the button above.")
         return
 
-    await accept_emoji(message, user_id, message.text.strip(), repo, packs)
+    await accept_emoji(message, user_id, text, repo, packs)
 
 
 @router.message(Command("mypacks"))
