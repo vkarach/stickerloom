@@ -5,6 +5,7 @@ from typing import NamedTuple
 from aiogram import Bot, F, Router
 from aiogram.types import FSInputFile, Message
 
+from bot.handlers.offer import offer_keyboard
 from bot.handlers.session import ask_for_emoji
 from db.packs import PackRepo
 from packs import PackManager
@@ -72,8 +73,10 @@ def _validate(name: str, size: int) -> None:
         raise UnsupportedInput(f"Too big, limit is {MAX_SOURCE_BYTES // (1024 * 1024)} MB.")
 
 
-def _caption(result: ConvertResult) -> str:
-    return (f"{result.width}x{result.height} - {result.duration:.1f}s - "
+def _caption(result: ConvertResult, emoji: str | None) -> str:
+    """The emoji rides along with the file, so a batch of answers stays paired up."""
+    lead = f"{emoji} " if emoji else ""
+    return (f"{lead}{result.width}x{result.height} - {result.duration:.1f}s - "
             f"{result.size // 1024} KB")
 
 
@@ -130,9 +133,8 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
             return
 
         document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
-        await message.answer_document(document, caption=_caption(result))
-        if source.emoji:
-            await message.answer(source.emoji)
+        await message.answer_document(document, caption=_caption(result, source.emoji),
+                                      reply_markup=offer_keyboard())
 
     async def on_error(exc: Exception) -> None:
         if spot is not None:

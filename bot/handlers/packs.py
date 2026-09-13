@@ -7,7 +7,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.formatting import Bold, Text, TextLink, as_list
 
-from bot.handlers.session import USE_SUGGESTED, accept_emoji
+from bot.handlers.session import USE_SUGGESTED, accept_emoji, ask_for_emoji
 from db.packs import PackRepo
 from packs import PackError, PackManager
 from packs.emoji import is_emoji, split_emoji
@@ -126,6 +126,7 @@ async def _start_collecting(message: Message, user_id: int, title: str,
     await repo.set_asking(user_id, None)
     await repo.set_building(user_id, True)
     await message.answer("Send files or stickers. /done to finish.")
+    await ask_for_emoji(message, user_id, repo)
 
 
 @router.message(Command("done"))
