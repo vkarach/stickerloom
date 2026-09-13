@@ -1,5 +1,6 @@
 """Telegram set names: letters, digits and single underscores, ending in the bot suffix."""
 
+import hashlib
 import re
 
 MAX_NAME = 64
@@ -33,3 +34,8 @@ def build_name(base: str, bot_username: str) -> str:
     return base + suffix_for(bot_username)
 
 
+
+
+def tag_for(name: str) -> str:
+    """A short stable handle for callback data, where the full set name does not fit."""
+    return hashlib.sha1(name.encode()).hexdigest()[:10]

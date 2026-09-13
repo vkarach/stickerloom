@@ -12,7 +12,7 @@ from bot.handlers.session import (ADD_ANYWAY, SKIP_DUPLICATE, USE_SUGGESTED,
 from db.packs import PackRepo
 from packs import PackError, PackManager
 from packs.emoji import is_emoji, split_emoji
-from packs.names import build_name, check_base
+from packs.names import build_name, check_base, tag_for
 
 log = logging.getLogger(__name__)
 
@@ -302,20 +302,22 @@ def _list_view(mine: list) -> tuple[Text, InlineKeyboardMarkup]:
 
     rows = []
     buttons = []
-    for index, (pack, count) in enumerate(mine):
+    for pack, count in mine:
         rows.append(Text("- ", TextLink(pack.title, url=PackManager.link(pack.name)),
                          f" ({count})"))
-        buttons.append([InlineKeyboardButton(text=pack.title, callback_data=f"pack:open:{index}")])
+        buttons.append([InlineKeyboardButton(
+            text=pack.title, callback_data=f"pack:open:{tag_for(pack.name)}")])
     return (as_list(Bold("Your packs"), *rows, sep="\n"),
             InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
-def _menu_view(pack, count: int, index: int, active: bool) -> tuple[Text, InlineKeyboardMarkup]:
-    fill = ("Stop adding", f"pack:stop:{index}") if active else ("Add stickers", f"pack:add:{index}")
+def _menu_view(pack, count: int, active: bool) -> tuple[Text, InlineKeyboardMarkup]:
+    tag = tag_for(pack.name)
+    fill = ("Stop adding", f"pack:stop:{tag}") if active else ("Add stickers", f"pack:add:{tag}")
     buttons = [
         [InlineKeyboardButton(text=fill[0], callback_data=fill[1])],
-        [InlineKeyboardButton(text="Edit stickers", callback_data=f"edit:list:{index}:0")],
-        [InlineKeyboardButton(text="Delete pack", callback_data=f"pack:drop:{index}")],
+        [InlineKeyboardButton(text="Edit stickers", callback_data=f"edit:list:{tag}:0")],
+        [InlineKeyboardButton(text="Delete pack", callback_data=f"pack:drop:{tag}")],
         [InlineKeyboardButton(text="Back", callback_data="pack:back:0")],
     ]
     state = "\nSend files or stickers here. /done when finished." if active else ""
@@ -323,10 +325,10 @@ def _menu_view(pack, count: int, index: int, active: bool) -> tuple[Text, Inline
     return content, InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def _confirm_view(pack, index: int) -> tuple[Text, InlineKeyboardMarkup]:
+def _confirm_view(pack) -> tuple[Text, InlineKeyboardMarkup]:
     buttons = [[
-        InlineKeyboardButton(text="Delete", callback_data=f"pack:kill:{index}"),
-        InlineKeyboardButton(text="Keep", callback_data=f"pack:open:{index}"),
+        InlineKeyboardButton(text="Delete", callback_data=f"pack:kill:{tag_for(pack.name)}"),
+        InlineKeyboardButton(text="Keep", callback_data=f"pack:open:{tag_for(pack.name)}"),
     ]]
     return Text("Delete ", pack.title, "?"), InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -336,26 +338,29 @@ async def pack_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager)
     assert callback.data and callback.from_user
     user_id = callback.from_user.id
     _, action, raw = callback.data.split(":")
-    index = int(raw)
 
     if isinstance(callback.message, Message):
         await drop_preview(callback.message, user_id)
 
     mine = await _surviving(user_id, repo, packs)
-    if action != "back" and index >= len(mine):
-        await callback.answer("That pack is gone")
+    if action == "back":
+        await callback.answer()
         await _render(callback, *_list_view(mine))
         return
 
+    chosen = _by_tag(mine, raw)
+    if chosen is None:
+        await callback.answer("That pack is gone")
+        await _render(callback, *_list_view(mine))
+        return
+    pack, count = chosen
+
     if action == "add":
-        await repo.set_active(user_id, mine[index][0].name)
+        await repo.set_active(user_id, pack.name)
         await repo.set_building(user_id, False)
-        await callback.answer()
     elif action == "stop":
         await repo.clear_active(user_id)
-        await callback.answer()
     elif action == "kill":
-        pack = mine[index][0]
         try:
             await packs.remove(user_id, pack.name)
         except Exception as exc:
@@ -365,44 +370,43 @@ async def pack_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager)
         if pack.name == await repo.active_for(user_id):
             await repo.clear_active(user_id)
         await callback.answer("Deleted")
-        mine = [row for row in mine if row[0].name != pack.name]
-        await _render(callback, *_list_view(mine))
+        await _render(callback, *_list_view([row for row in mine if row[0].name != pack.name]))
         return
-    else:
-        await callback.answer()
 
+    await callback.answer()
     if action == "drop":
-        await _render(callback, *_confirm_view(mine[index][0], index))
-        return
-    if action == "back":
-        await _render(callback, *_list_view(mine))
+        await _render(callback, *_confirm_view(pack))
         return
 
-    pack, count = mine[index]
     active = pack.name == await repo.active_for(user_id)
-    await _render(callback, *_menu_view(pack, count, index, active))
+    await _render(callback, *_menu_view(pack, count, active))
 
 
-def _sticker_list_view(pack, entries: list, index: int) -> tuple[Text, InlineKeyboardMarkup]:
+def _by_tag(mine: list, tag: str):
+    return next((row for row in mine if tag_for(row[0].name) == tag), None)
+
+
+def _sticker_list_view(pack, entries: list) -> tuple[Text, InlineKeyboardMarkup]:
+    tag = tag_for(pack.name)
     shown = entries[:MAX_PICKERS]
     rows = [
-        [InlineKeyboardButton(text=f"{n + 1} {emoji}", callback_data=f"edit:pick:{index}:{n}")
+        [InlineKeyboardButton(text=f"{n + 1} {emoji}", callback_data=f"edit:pick:{tag}:{n}")
          for n, (_, emoji) in group]
         for group in _chunks(list(enumerate(shown)), PICKERS_PER_ROW)
     ]
-    rows.append([InlineKeyboardButton(text="Back", callback_data=f"pack:open:{index}")])
+    rows.append([InlineKeyboardButton(text="Back", callback_data=f"pack:open:{tag}")])
     tail = f" First {MAX_PICKERS} shown." if len(entries) > MAX_PICKERS else ""
     return (Text("Pick a sticker in ",
                  TextLink(pack.title, url=PackManager.link(pack.name)), ".", tail),
             InlineKeyboardMarkup(inline_keyboard=rows))
 
 
-def _sticker_view(emoji: str, index: int, spot: int,
+def _sticker_view(emoji: str, tag: str, spot: int,
                   waiting: bool = False) -> tuple[Text, InlineKeyboardMarkup]:
     buttons = [
-        [InlineKeyboardButton(text="Change emoji", callback_data=f"edit:emoji:{index}:{spot}")],
-        [InlineKeyboardButton(text="Remove", callback_data=f"edit:drop:{index}:{spot}")],
-        [InlineKeyboardButton(text="Back", callback_data=f"edit:list:{index}:0")],
+        [InlineKeyboardButton(text="Change emoji", callback_data=f"edit:emoji:{tag}:{spot}")],
+        [InlineKeyboardButton(text="Remove", callback_data=f"edit:drop:{tag}:{spot}")],
+        [InlineKeyboardButton(text="Back", callback_data=f"edit:list:{tag}:0")],
     ]
     ask = "\nSend a new emoji." if waiting else ""
     return (Text(f"Sticker {spot + 1} - {emoji}{ask}"),
@@ -435,44 +439,40 @@ async def edit_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager)
     assert callback.data and callback.from_user
     user_id = callback.from_user.id
     _, action, raw_pack, raw_spot = callback.data.split(":")
-    index, spot = int(raw_pack), int(raw_spot)
+    spot = int(raw_spot)
 
     if isinstance(callback.message, Message):
         await drop_preview(callback.message, user_id)
 
     mine = await _surviving(user_id, repo, packs)
-    if index >= len(mine):
+    chosen = _by_tag(mine, raw_pack)
+    if chosen is None:
         await callback.answer("That pack is gone")
         await _render(callback, *_list_view(mine))
         return
 
-    pack = mine[index][0]
+    pack = chosen[0]
     entries = await packs.stickers(pack.name)
     if action != "list" and spot >= len(entries):
         await callback.answer("That sticker is gone")
-        await _render(callback, *_sticker_list_view(pack, entries, index))
+        await _render(callback, *_sticker_list_view(pack, entries))
         return
 
     if action == "list":
         await callback.answer()
-        await _render(callback, *_sticker_list_view(pack, entries, index))
+        await _render(callback, *_sticker_list_view(pack, entries))
         return
 
     file_id, emoji = entries[spot]
 
-    if action == "pick":
+    if action in ("pick", "emoji"):
+        if action == "emoji":
+            await repo.set_editing(user_id, file_id)
         await callback.answer()
         if isinstance(callback.message, Message):
             await _show_preview(callback.message, user_id, file_id)
-        await _render(callback, *_sticker_view(emoji, index, spot))
-        return
-
-    if action == "emoji":
-        await repo.set_editing(user_id, file_id)
-        await callback.answer()
-        if isinstance(callback.message, Message):
-            await _show_preview(callback.message, user_id, file_id)
-        await _render(callback, *_sticker_view(emoji, index, spot, waiting=True))
+        waiting = action == "emoji"
+        await _render(callback, *_sticker_view(emoji, tag_for(pack.name), spot, waiting))
         return
 
     try:
@@ -484,7 +484,7 @@ async def edit_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager)
 
     await callback.answer("Removed")
     entries = await packs.stickers(pack.name)
-    await _render(callback, *_sticker_list_view(pack, entries, index))
+    await _render(callback, *_sticker_list_view(pack, entries))
 
 
 async def _render(callback: CallbackQuery, content: Text, keyboard: InlineKeyboardMarkup) -> None:

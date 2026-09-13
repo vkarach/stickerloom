@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 from models import Pack, QueuedSticker
+from packs.names import tag_for
 
 log = logging.getLogger(__name__)
 
@@ -92,23 +93,28 @@ class PackRepo:
         await self._conn.execute(self._REMEMBER, (user_id, name, title, created))
         await self._conn.commit()
         log.info("user %s owns pack %s", user_id, name)
-        return Pack(user_id=user_id, name=name, title=title, created_at=created)
+        stored = await self.find(user_id, name)
+        return stored or Pack(user_id, name, title, created)
 
     async def list_for(self, user_id: int) -> list[Pack]:
         async with self._conn.execute(self._LIST, (user_id,)) as cursor:
             rows = await cursor.fetchall()
-        return [Pack(r["user_id"], r["name"], r["title"], r["created_at"]) for r in rows]
+        return [_pack(row) for row in rows]
 
     async def find(self, user_id: int, name: str) -> Pack | None:
         async with self._conn.execute(self._FIND, (user_id, name)) as cursor:
             row = await cursor.fetchone()
-        return Pack(row["user_id"], row["name"], row["title"], row["created_at"]) if row else None
+        return _pack(row) if row else None
 
     async def forget(self, user_id: int, name: str) -> None:
         await self._conn.execute(self._FORGET, (user_id, name))
         await self._conn.execute(self._FORGET_SHAS, (name,))
         await self._conn.commit()
         log.info("user %s no longer owns pack %s", user_id, name)
+
+    async def find_by_tag(self, user_id: int, tag: str) -> Pack | None:
+        """Callbacks carry a tag, not a name: a set name does not fit in 64 bytes."""
+        return next((p for p in await self.list_for(user_id) if tag_for(p.name) == tag), None)
 
     async def set_active(self, user_id: int, name: str) -> None:
         await self._ensure(user_id)
@@ -265,6 +271,10 @@ class PackRepo:
         async with self._conn.execute(self._GET_EMOJI, (user_id,)) as cursor:
             row = await cursor.fetchone()
         return (row["emoji"] if row else None) or DEFAULT_EMOJI
+
+
+def _pack(row) -> Pack:
+    return Pack(row["user_id"], row["name"], row["title"], row["created_at"])
 
 
 def _sticker(row) -> QueuedSticker:
