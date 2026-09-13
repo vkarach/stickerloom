@@ -1,4 +1,4 @@
-"""Telegram wants real emoji in emoji_list, so reject anything that plainly is not."""
+"""Telegram wants real emoji in emoji_list, so pick them out of whatever was sent."""
 
 MAX_EMOJI = 20
 
@@ -16,20 +16,22 @@ def _is_emoji_char(char: str) -> bool:
 
 
 def split_emoji(text: str) -> list[str]:
-    """Cut a run of emoji into single ones; Telegram keeps only the first of a repeat."""
+    """Pull the emoji out of a message, one entry each; Telegram drops repeats anyway."""
     parts: list[str] = []
-    for char in text.strip():
+    for char in text:
         if not _is_emoji_char(char):
-            return []
+            parts.append("")  # anything else ends the run it interrupts
+            continue
         code = ord(char)
+        last = parts[-1] if parts else ""
         joined = code in _ATTACHED or code in _SKIN
-        continues = bool(parts) and ord(parts[-1][-1]) == ZWJ
-        pairs = bool(parts) and code in _FLAG and len(parts[-1]) == 1 and ord(parts[-1]) in _FLAG
-        if parts and (joined or continues or pairs):
+        continues = bool(last) and ord(last[-1]) == ZWJ
+        pairs = len(last) == 1 and code in _FLAG and ord(last) in _FLAG
+        if last and (joined or continues or pairs):
             parts[-1] += char
         else:
             parts.append(char)
-    return list(dict.fromkeys(parts))
+    return list(dict.fromkeys(part for part in parts if part))
 
 
 def is_emoji(text: str) -> bool:

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -25,16 +26,18 @@ PICKERS_PER_ROW = 5
 # the sticker shown while its menu is open, so it can be taken away again
 _PREVIEWS: dict[int, int] = {}
 
-LINK_PREFIXES = ("https://t.me/addstickers/", "http://t.me/addstickers/", "t.me/addstickers/")
+# a link can arrive as a t.me url, a tg:// one, or just the name, with text around it
+_LINK = re.compile(r"(?:addstickers/|addstickers\?set=)([A-Za-z0-9_]{1,64})", re.IGNORECASE)
+_BARE = re.compile(r"[A-Za-z0-9_]{1,64}")
 
 
 def set_name_from(raw: str) -> str:
-    name = raw.strip()
-    for prefix in LINK_PREFIXES:
-        if name.lower().startswith(prefix):
-            name = name[len(prefix):]
-            break
-    return name.strip().strip("/")
+    """Pull the set name out of whatever the user pasted, or hand the text back as it came."""
+    found = _LINK.search(raw)
+    if found:
+        return found.group(1)
+    bare = raw.strip().lstrip("@").rstrip("/")
+    return bare if _BARE.fullmatch(bare) else raw.strip()
 
 
 async def _ask_for_prefix(message: Message, user_id: int, repo: PackRepo,

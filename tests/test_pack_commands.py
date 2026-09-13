@@ -11,6 +11,9 @@ from bot.handlers.packs import set_name_from
     ("mypack", "mypack"),
     ("  mypack  ", "mypack"),
     ("https://t.me/addstickers/mypack/", "mypack"),
+    ("take this: https://t.me/addstickers/mypack please", "mypack"),
+    ("tg://addstickers?set=mypack", "mypack"),
+    ("@mypack", "mypack"),
 ])
 def test_a_pack_link_yields_its_name(raw, expected):
     assert set_name_from(raw) == expected
