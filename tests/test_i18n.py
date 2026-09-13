@@ -27,6 +27,16 @@ def test_a_placeholder_is_filled():
     assert Translator()("pack.done", link="t.me/x") == "Done. t.me/x"
 
 
+def test_ukrainian_picks_one_of_three_forms():
+    counts = [1, 3, 7]
+    forms = {Translator("uk")("cancel.dropped", n=n) for n in counts}
+    assert len(forms) == len(counts)
+
+
+def test_each_language_brings_its_own_default_emoji():
+    assert Translator("uk")("lang.emoji") != Translator("en")("lang.emoji")
+
+
 def test_english_picks_the_plural_form():
     english = Translator("en")
     assert english("cancel.dropped", n=1) == "Cancelled. 1 file dropped."
@@ -35,6 +45,7 @@ def test_english_picks_the_plural_form():
 
 @pytest.mark.parametrize("tag,expected", [
     ("en", "en"), ("en-GB", "en"), ("EN", "en"), (None, "en"), ("xx", "en"),
+    ("uk", "uk"), ("uk-UA", "uk"),
 ])
 def test_a_telegram_language_tag_maps_to_what_we_have(tag, expected):
     assert known(tag) == expected

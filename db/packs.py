@@ -321,6 +321,12 @@ class PackRepo:
         await self._conn.commit()
         return dropped
 
+    async def chosen_emoji(self, user_id: int) -> str | None:
+        """The raw column: None means the user never picked one himself."""
+        async with self._conn.execute(self._GET_EMOJI, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return row["emoji"] if row else None
+
     async def emoji_for(self, user_id: int) -> str:
         async with self._conn.execute(self._GET_EMOJI, (user_id,)) as cursor:
             row = await cursor.fetchone()

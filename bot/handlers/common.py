@@ -14,7 +14,6 @@ from i18n import Translator, languages
 router = Router()
 
 PICK_LANG = "lang:"
-LANGUAGE_NAMES = {"en": "English", "ru": "Russian"}
 
 
 def _format(t: Translator):
@@ -31,7 +30,8 @@ def _format(t: Translator):
 
 def _language_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=LANGUAGE_NAMES.get(lang, lang), callback_data=PICK_LANG + lang)]
+        [InlineKeyboardButton(text=Translator(lang)("lang.name"),
+                              callback_data=PICK_LANG + lang)]
         for lang in languages()
     ])
 
@@ -63,10 +63,18 @@ async def pick_lang(callback: CallbackQuery, repo: PackRepo) -> None:
     await repo.set_lang(callback.from_user.id, lang)
 
     spoken = Translator(lang)
+    if await _emoji_is_untouched(callback.from_user.id, repo):
+        await repo.set_emoji(callback.from_user.id, spoken("lang.emoji"))
     await callback.answer()
     if isinstance(callback.message, Message):
         await callback.message.edit_text(spoken("lang.set"))
         await setup_commands(callback.message.bot, spoken, callback.from_user.id)
+
+
+async def _emoji_is_untouched(user_id: int, repo: PackRepo) -> bool:
+    """A language may set the default emoji, but never overwrite one a user picked."""
+    chosen = await repo.chosen_emoji(user_id)
+    return chosen is None or chosen in {Translator(lang)("lang.emoji") for lang in languages()}
 
 
 @router.message(Command("cancel"))

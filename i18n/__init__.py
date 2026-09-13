@@ -16,7 +16,7 @@ def _english_form(count: int) -> int:
     return 0 if count == 1 else 1
 
 
-def _russian_form(count: int) -> int:
+def _slavic_form(count: int) -> int:
     if count % 10 == 1 and count % 100 != 11:
         return 0
     if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14:
@@ -24,7 +24,7 @@ def _russian_form(count: int) -> int:
     return 2
 
 
-PLURAL_FORMS = {"en": _english_form, "ru": _russian_form}
+PLURAL_FORMS = {"en": _english_form, "ru": _slavic_form, "uk": _slavic_form}
 
 
 def load() -> list[str]:
