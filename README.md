@@ -47,6 +47,10 @@ expanded into frames before encoding.
 BOT_TOKEN=<token from @BotFather>
 ```
 
+Inline mode must be turned on for the bot, otherwise the "Send to @Stickers"
+button on every result does nothing: in @BotFather run `/setinline` for this bot
+and give it any placeholder text.
+
 ## Running
 
 ```
@@ -78,3 +82,13 @@ Open @Stickers, send `/newpack` (or `/addsticker`), choose **video sticker**,
 then forward the files this bot produced **as files, not as videos**. Sending
 them as video lets Telegram re-encode them and @Stickers then refuses the
 result.
+
+Each result carries a **Send to @Stickers** button, which opens the chat picker
+limited to bots: pick @Stickers and the file goes there as your own message,
+with no forward header. When the source was a sticker, its emoji is offered in
+the same list, since @Stickers asks for one right after the file.
+
+A bot cannot talk to @Stickers on your behalf, so this is as automatic as the
+Bot API allows. Adding stickers to a pack that @Stickers created is not possible
+at all: `addStickerToSet` answers `STICKERSET_INVALID` for any set this bot did
+not create itself.
