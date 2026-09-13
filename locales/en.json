@@ -9,6 +9,7 @@
   "group.general": "General",
   "group.packs": "Packs",
   "group.reference": "Reference",
+  "group.admin": "Admin",
   "cmd.start": "What this bot does",
   "cmd.help": "Show all commands",
   "cmd.cancel": "Stop whatever is in progress",
@@ -19,6 +20,7 @@
   "cmd.import": "Copy someone's pack into your own",
   "cmd.emoji": "Default emoji",
   "cmd.format": "What the output looks like",
+  "cmd.stats": "Usage numbers",
   "cancel.nothing": "Nothing to cancel.",
   "cancel.done": "Cancelled.",
   "cancel.dropped": [
@@ -140,5 +142,19 @@
   "error.too_heavy": "Will not fit {kb} KB, best was {best} KB. Try something shorter.",
   "error.pack_full": "Pack is full. /newpack starts another.",
   "error.not_ours": "This bot can only edit packs it made. Copy it with /import.",
-  "error.pack_empty": "{name} is empty."
+  "error.pack_empty": "{name} is empty.",
+  "admin.runtime": "Runtime",
+  "admin.uptime": "up {value}",
+  "admin.days": "{n}d {hours}h",
+  "admin.hours": "{n}h {minutes}m",
+  "admin.minutes": "{n}m",
+  "admin.converting": "converting now: {n}",
+  "admin.stored": "Stored",
+  "admin.users": "users: {n} ({spoken})",
+  "admin.packs": "packs: {n} owned by {owners}",
+  "admin.new_packs": "new packs: {today} today, {week} this week",
+  "admin.stickers": "stickers: {n}",
+  "admin.queued": "parked in the queue: {n}",
+  "admin.nobody": "nobody yet",
+  "admin.refresh": "Refresh"
 }

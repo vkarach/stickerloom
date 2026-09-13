@@ -43,6 +43,9 @@ class JobQueue:
     async def drain(self) -> None:
         await self._queue.join()
 
+    def depth(self) -> int:
+        return sum(1 for job in self._pending if not job.cancelled)
+
     def pending_for(self, key: int) -> int:
         return sum(1 for job in self._pending if job.key == key and not job.cancelled)
 

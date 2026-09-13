@@ -42,8 +42,8 @@ async def cmd_start(message: Message, t: Translator) -> None:
 
 
 @router.message(Command("help"))
-async def cmd_help(message: Message, t: Translator) -> None:
-    await message.answer(**help_content(t).as_kwargs())
+async def cmd_help(message: Message, t: Translator, is_admin: bool = False) -> None:
+    await message.answer(**help_content(t, admin=is_admin).as_kwargs())
 
 
 @router.message(Command("format"))
@@ -57,7 +57,7 @@ async def cmd_lang(message: Message, t: Translator) -> None:
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith(PICK_LANG))
-async def pick_lang(callback: CallbackQuery, repo: PackRepo) -> None:
+async def pick_lang(callback: CallbackQuery, repo: PackRepo, is_admin: bool = False) -> None:
     assert callback.data and callback.from_user
     lang = callback.data[len(PICK_LANG):]
     await repo.set_lang(callback.from_user.id, lang)
@@ -68,7 +68,7 @@ async def pick_lang(callback: CallbackQuery, repo: PackRepo) -> None:
     await callback.answer()
     if isinstance(callback.message, Message):
         await callback.message.edit_text(spoken("lang.set"))
-        await setup_commands(callback.message.bot, spoken, callback.from_user.id)
+        await setup_commands(callback.message.bot, spoken, callback.from_user.id, is_admin)
 
 
 async def _emoji_is_untouched(user_id: int, repo: PackRepo) -> bool:

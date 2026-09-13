@@ -1,7 +1,7 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from models import Pack, QueuedSticker
+from models import Overview, Pack, QueuedSticker
 from packs.names import tag_for
 
 log = logging.getLogger(__name__)
@@ -93,6 +93,16 @@ class PackRepo:
     )
     _COUNT_ALL = "SELECT COUNT(*) AS n FROM queued_stickers WHERE user_id = ?"
     _CLEAR_STICKERS = "DELETE FROM queued_stickers WHERE user_id = ?"
+
+    _COUNT_USERS = "SELECT COUNT(*) AS n FROM users"
+    _COUNT_PACKS = "SELECT COUNT(*) AS n, COUNT(DISTINCT user_id) AS owners FROM packs"
+    _COUNT_PACKS_SINCE = "SELECT COUNT(*) AS n FROM packs WHERE created_at >= ?"
+    _COUNT_PACK_STICKERS = "SELECT COUNT(*) AS n FROM pack_stickers"
+    _COUNT_QUEUED = "SELECT COUNT(*) AS n FROM queued_stickers"
+    _COUNT_BY_LANG = (
+        "SELECT COALESCE(lang, '?') AS lang, COUNT(*) AS n FROM users "
+        "GROUP BY 1 ORDER BY n DESC, lang"
+    )
 
     def __init__(self, conn):
         self._conn = conn
@@ -331,6 +341,32 @@ class PackRepo:
         async with self._conn.execute(self._GET_EMOJI, (user_id,)) as cursor:
             row = await cursor.fetchone()
         return (row["emoji"] if row else None) or DEFAULT_EMOJI
+
+    async def overview(self) -> Overview:
+        now = datetime.now(timezone.utc)
+        day = (now - timedelta(days=1)).isoformat()
+        week = (now - timedelta(days=7)).isoformat()
+        packs = await self._row(self._COUNT_PACKS)
+        async with self._conn.execute(self._COUNT_BY_LANG) as cursor:
+            spoken = tuple((row["lang"], row["n"]) for row in await cursor.fetchall())
+        return Overview(
+            users=await self._count(self._COUNT_USERS),
+            packs=packs["n"] if packs else 0,
+            owners=packs["owners"] if packs else 0,
+            stickers=await self._count(self._COUNT_PACK_STICKERS),
+            queued=await self._count(self._COUNT_QUEUED),
+            packs_today=await self._count(self._COUNT_PACKS_SINCE, (day,)),
+            packs_week=await self._count(self._COUNT_PACKS_SINCE, (week,)),
+            languages=spoken,
+        )
+
+    async def _row(self, sql: str, params: tuple = ()):
+        async with self._conn.execute(sql, params) as cursor:
+            return await cursor.fetchone()
+
+    async def _count(self, sql: str, params: tuple = ()) -> int:
+        row = await self._row(sql, params)
+        return row["n"] if row else 0
 
 
 def _pack(row) -> Pack:

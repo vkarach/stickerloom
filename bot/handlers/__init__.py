@@ -2,6 +2,7 @@ from aiogram import Router
 
 from bot.middlewares import LanguageMiddleware, QueueGuardMiddleware
 
+from .admin import router as admin_router
 from .common import router as common_router
 from .convert import router as convert_router
 from .offer import router as offer_router
@@ -10,6 +11,7 @@ from .packs import router as packs_router
 router = Router()
 router.message.middleware(LanguageMiddleware())
 router.callback_query.middleware(LanguageMiddleware())
+router.include_router(admin_router)
 router.include_router(common_router)
 router.include_router(packs_router)
 router.include_router(offer_router)

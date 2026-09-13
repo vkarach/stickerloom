@@ -60,7 +60,24 @@ language, so the `/` list is translated too.
 
 ```
 BOT_TOKEN=<token from @BotFather>
+ADMIN_IDS=<your Telegram user id, comma separated for several>
 ```
+
+## Admin
+
+`/stats` prints usage totals: users and the languages they were answered in,
+packs and how many were made in the last day and week, stickers stored and the
+depth of the convert queue. It is the only admin surface and it reads counts
+only, never a user's packs or files.
+
+It speaks the language you picked, like everything else the bot says.
+
+Who may run it is decided by `ADMIN_IDS` in `.env`, which is never committed, so
+the repository can be public without naming anyone. There is no command that
+adds an admin: the list changes on the server and nowhere else. A user who is
+not on it gets no answer at all - `/stats` behaves exactly like a command that
+does not exist, so the panel cannot be found by guessing. An empty or missing
+`ADMIN_IDS` means nobody is an admin.
 
 ## Running
 
@@ -86,6 +103,7 @@ real ffmpeg that assert the output really matches the format table above.
 - `/cancel` - stop whatever is in progress
 - `/newpack`, `/done`, `/mypacks`, `/import`, `/emoji` - the pack flow
 - `/format` - the exact output format
+- `/stats` - usage totals, admins only
 
 ## Building a pack
 

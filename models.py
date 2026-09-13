@@ -59,3 +59,15 @@ class Job:
     on_done: Callable[[ConvertResult], Awaitable[None]]
     on_error: Callable[[Exception], Awaitable[None]]
     cancelled: bool = field(default=False, compare=False)
+
+
+@dataclass(frozen=True)
+class Overview:
+    users: int
+    packs: int
+    owners: int
+    stickers: int
+    queued: int
+    packs_today: int
+    packs_week: int
+    languages: tuple[tuple[str, int], ...]

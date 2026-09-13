@@ -12,6 +12,7 @@ class CommandSpec:
     name: str
     group: str = "group.general"
     hidden: bool = False
+    admin: bool = False
 
     @property
     def description(self) -> str:
@@ -31,24 +32,27 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("emoji", group="group.packs"),
 
     CommandSpec("format", group="group.reference"),
+
+    CommandSpec("stats", group="group.admin", admin=True),
 )
 
 BY_NAME: dict[str, CommandSpec] = {c.name: c for c in COMMANDS}
 
 
-def menu(t: Translator) -> list[BotCommand]:
+def menu(t: Translator, *, admin: bool = False) -> list[BotCommand]:
     return [
         BotCommand(command=c.name, description=t(c.description))
-        for c in COMMANDS if not c.hidden
+        for c in COMMANDS if not c.hidden and (admin or not c.admin)
     ]
 
 
-def help_content(t: Translator) -> Text:
+def help_content(t: Translator, *, admin: bool = False) -> Text:
     sections = []
     for group in dict.fromkeys(c.group for c in COMMANDS):
         rows = [
             Text(CommandText(f"/{c.name}"), " : ", t(c.description))
-            for c in COMMANDS if c.group == group and not c.hidden
+            for c in COMMANDS
+            if c.group == group and not c.hidden and (admin or not c.admin)
         ]
         if rows:
             sections.append(as_marked_section(Bold(t(group)), *rows, marker="- "))
