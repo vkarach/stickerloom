@@ -9,7 +9,9 @@ from dotenv import load_dotenv
 from bot.handlers import router
 from bot.setup import setup_commands
 from convert.queue import JobQueue
+from db import PackRepo, connect
 from logging_config import setup_logging
+from packs import PackManager
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +31,8 @@ async def main() -> None:
     check_binaries()
 
     queue = JobQueue(workers=WORKERS)
+    conn = await connect()
+    repo = PackRepo(conn)
 
     async def on_startup(bot: Bot) -> None:
         await setup_commands(bot)
@@ -36,6 +40,7 @@ async def main() -> None:
 
     async def on_shutdown() -> None:
         await queue.stop()
+        await conn.close()
         log.info("shut down")
 
     bot = Bot(token=os.environ["BOT_TOKEN"])
@@ -44,7 +49,7 @@ async def main() -> None:
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
 
-    await dp.start_polling(bot, queue=queue)
+    await dp.start_polling(bot, queue=queue, repo=repo, packs=PackManager(bot, repo))
 
 
 if __name__ == "__main__":

@@ -5,6 +5,9 @@ from typing import NamedTuple
 from aiogram import Bot, F, Router
 from aiogram.types import FSInputFile, Message
 
+from db.packs import PackRepo
+from packs import PackError, PackManager
+
 from convert.errors import StickerloomError, UnsupportedInput
 from convert.queue import JobQueue
 from convert.spec import (
@@ -79,8 +82,36 @@ def _caption(result: ConvertResult) -> str:
             f"{result.size // 1024} KB")
 
 
+async def _into_pack(message: Message, user_id: int, result: ConvertResult,
+                     emoji: str | None, repo: PackRepo, packs: PackManager) -> None:
+    """Runs after the file is delivered, so a pack failure never costs the conversion."""
+    pending = await repo.take_pending(user_id)
+    active = None if pending else await repo.active_for(user_id)
+    if not pending and not active:
+        return
+
+    chosen = emoji or await repo.emoji_for(user_id)
+    try:
+        if pending:
+            pack = await packs.create(user_id, pending, result.path, chosen)
+            await message.answer(
+                f"Created {pack.title}: {PackManager.link(pack.name)}\n"
+                "Keep sending files, they go into it. /nopack to stop.",
+                link_preview_options={"is_disabled": True},
+            )
+            return
+        await packs.add(user_id, active, result.path, chosen)
+        await message.answer(f"Added to your pack with {chosen}")
+    except PackError as exc:
+        await message.answer(str(exc))
+    except Exception:
+        log.exception("pack step failed for user %s", user_id)
+        await message.answer("The file is fine, but adding it to the pack failed.")
+
+
 @router.message(MEDIA)
-async def handle_media(message: Message, bot: Bot, queue: JobQueue) -> None:
+async def handle_media(message: Message, bot: Bot, queue: JobQueue,
+                       repo: PackRepo, packs: PackManager) -> None:
     assert message.from_user
     user_id = message.from_user.id
 
@@ -108,6 +139,7 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue) -> None:
         if source.emoji:
             await message.answer(source.emoji)
         await _delete(status)
+        await _into_pack(message, user_id, result, source.emoji, repo, packs)
 
     async def on_error(exc: Exception) -> None:
         if isinstance(exc, StickerloomError):
