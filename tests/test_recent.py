@@ -72,3 +72,12 @@ def test_results_skip_the_emoji_when_unknown():
 def test_result_ids_stay_unique_across_items():
     results = _results([item(emoji="\U0001f525"), item(emoji="\U0001f600")])
     assert len({r.id for r in results}) == len(results)
+
+
+def test_the_emoji_rides_along_as_the_caption():
+    results = _results([item(emoji="\U0001f62d")])
+    assert results[0].caption == "\U0001f62d"
+
+
+def test_no_emoji_means_no_caption():
+    assert _results([item()])[0].caption is None

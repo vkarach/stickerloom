@@ -18,19 +18,21 @@ CACHE_SECONDS = 5
 
 
 def _results(items: list[Delivered]) -> list:
+    """One pick sends one message, so the emoji rides along as the caption."""
     results = []
     for index, item in enumerate(items):
         results.append(InlineQueryResultCachedDocument(
             id=f"f{index}",
             title=item.name,
             document_file_id=item.file_id,
-            description="send this file",
+            caption=item.emoji,
+            description=f"file with {item.emoji}" if item.emoji else "send this file",
         ))
         if item.emoji:
             results.append(InlineQueryResultArticle(
                 id=f"e{index}",
                 title=item.emoji,
-                description=f"send the emoji for {item.name}",
+                description="emoji on its own, if asked for it separately",
                 input_message_content=InputTextMessageContent(message_text=item.emoji),
             ))
     return results
