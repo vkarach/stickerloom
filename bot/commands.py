@@ -18,6 +18,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("help", "Show all commands"),
     CommandSpec("cancel", "Drop everything still queued"),
     CommandSpec("newpack", "Start a pack, filled by the files you send", group="Packs"),
+    CommandSpec("done", "Finish the pack you are filling", group="Packs"),
     CommandSpec("mypacks", "Your packs, and which one is being filled", group="Packs"),
     CommandSpec("nopack", "Stop adding to a pack", group="Packs"),
     CommandSpec("import", "Copy an existing pack so this bot can fill it", group="Packs"),

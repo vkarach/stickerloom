@@ -5,8 +5,9 @@ from typing import NamedTuple
 from aiogram import Bot, F, Router
 from aiogram.types import FSInputFile, Message
 
+from bot.handlers.session import ask_for_emoji
 from db.packs import PackRepo
-from packs import PackError, PackManager
+from packs import PackManager
 
 from convert.errors import StickerloomError, UnsupportedInput
 from convert.queue import JobQueue
@@ -82,31 +83,23 @@ def _caption(result: ConvertResult) -> str:
             f"{result.size // 1024} KB")
 
 
-async def _into_pack(message: Message, user_id: int, result: ConvertResult,
-                     emoji: str | None, repo: PackRepo, packs: PackManager) -> None:
-    """Runs after the file is delivered, so a pack failure never costs the conversion."""
-    pending = await repo.take_pending(user_id)
-    active = None if pending else await repo.active_for(user_id)
-    if not pending and not active:
+async def _in_pack_mode(user_id: int, repo: PackRepo) -> bool:
+    return bool(await repo.peek_pending(user_id) or await repo.active_for(user_id))
+
+
+async def _queue_for_pack(message: Message, user_id: int, name: str, result: ConvertResult,
+                          emoji: str | None, repo: PackRepo, packs: PackManager) -> None:
+    """Park the finished sticker on Telegram's servers and ask for its emoji."""
+    try:
+        file_id = await packs.upload(user_id, result.path)
+    except Exception:
+        log.exception("could not upload %r for user %s", name, user_id)
+        await message.answer(f"{name}: converted, but Telegram would not take the file.")
         return
 
-    chosen = emoji or await repo.emoji_for(user_id)
-    try:
-        if pending:
-            pack = await packs.create(user_id, pending, result.path, chosen)
-            await message.answer(
-                f"Created {pack.title}: {PackManager.link(pack.name)}\n"
-                "Keep sending files, they go into it. /nopack to stop.",
-                link_preview_options={"is_disabled": True},
-            )
-            return
-        await packs.add(user_id, active, result.path, chosen)
-        await message.answer(f"Added to your pack with {chosen}")
-    except PackError as exc:
-        await message.answer(str(exc))
-    except Exception:
-        log.exception("pack step failed for user %s", user_id)
-        await message.answer("The file is fine, but adding it to the pack failed.")
+    await repo.push_sticker(user_id, file_id, name, emoji)
+    if await repo.count_stickers(user_id) == 1:
+        await ask_for_emoji(message, user_id, repo)
 
 
 @router.message(MEDIA)
@@ -134,12 +127,15 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
         await _edit(status, f"{name}: converting")
 
     async def on_done(result: ConvertResult) -> None:
+        await _delete(status)
+        if await _in_pack_mode(user_id, repo):
+            await _queue_for_pack(message, user_id, name, result, source.emoji, repo, packs)
+            return
+
         document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
         await message.answer_document(document, caption=_caption(result))
         if source.emoji:
             await message.answer(source.emoji)
-        await _delete(status)
-        await _into_pack(message, user_id, result, source.emoji, repo, packs)
 
     async def on_error(exc: Exception) -> None:
         if isinstance(exc, StickerloomError):

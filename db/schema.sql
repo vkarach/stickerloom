@@ -14,3 +14,14 @@ CREATE TABLE IF NOT EXISTS packs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_packs_owner ON packs(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS queued_stickers (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    file_id    TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    suggested  TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_queued_owner ON queued_stickers(user_id, id);

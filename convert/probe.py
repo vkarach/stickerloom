@@ -25,10 +25,11 @@ def parse_probe(payload: dict) -> MediaInfo:
     if video is None:
         raise ProbeFailed("No video or image stream in this file")
 
+    container = payload.get("format", {})
     width = int(video.get("width") or 0)
     height = int(video.get("height") or 0)
     frames = int(_number(video.get("nb_frames"), 0))
-    duration = _number(video.get("duration")) or _number(payload.get("format", {}).get("duration"))
+    duration = _number(video.get("duration")) or _number(container.get("duration"))
 
     # ffmpeg reads animated webp as a 0x0 stream it cannot decode
     needs_expansion = width == 0 and video.get("codec_name") == "webp"
@@ -40,7 +41,20 @@ def parse_probe(payload: dict) -> MediaInfo:
         frames=frames or 1,
         is_animated=frames > 1 or duration > 0,
         needs_frame_expansion=needs_expansion,
+        codec=video.get("codec_name") or "",
+        container=container.get("format_name") or "",
+        fps=_rate(video.get("avg_frame_rate") or video.get("r_frame_rate")),
+        size=int(_number(container.get("size"), 0)),
+        has_audio=any(s.get("codec_type") == "audio" for s in streams),
     )
+
+
+def _rate(raw) -> float:
+    if not raw or "/" not in str(raw):
+        return _number(raw)
+    top, _, bottom = str(raw).partition("/")
+    divisor = _number(bottom)
+    return _number(top) / divisor if divisor else 0.0
 
 
 async def probe(path: Path) -> MediaInfo:

@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 
-from models import Pack
+from models import Pack, QueuedSticker
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +30,18 @@ class PackRepo:
 
     _SET_EMOJI = "UPDATE users SET emoji = ? WHERE user_id = ?"
     _GET_EMOJI = "SELECT emoji FROM users WHERE user_id = ?"
+
+    _PUSH_STICKER = (
+        "INSERT INTO queued_stickers (user_id, file_id, name, suggested, created_at) "
+        "VALUES (?, ?, ?, ?, ?)"
+    )
+    _HEAD_STICKER = (
+        "SELECT id, user_id, file_id, name, suggested FROM queued_stickers "
+        "WHERE user_id = ? ORDER BY id LIMIT 1"
+    )
+    _POP_STICKER = "DELETE FROM queued_stickers WHERE id = ?"
+    _COUNT_STICKERS = "SELECT COUNT(*) AS n FROM queued_stickers WHERE user_id = ?"
+    _CLEAR_STICKERS = "DELETE FROM queued_stickers WHERE user_id = ?"
 
     def __init__(self, conn):
         self._conn = conn
@@ -75,6 +87,11 @@ class PackRepo:
         await self._conn.execute(self._SET_PENDING, (title, user_id))
         await self._conn.commit()
 
+    async def peek_pending(self, user_id: int) -> str | None:
+        async with self._conn.execute(self._GET_PENDING, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return row["pending_title"] if row else None
+
     async def take_pending(self, user_id: int) -> str | None:
         async with self._conn.execute(self._GET_PENDING, (user_id,)) as cursor:
             row = await cursor.fetchone()
@@ -88,6 +105,37 @@ class PackRepo:
         await self._ensure(user_id)
         await self._conn.execute(self._SET_EMOJI, (emoji, user_id))
         await self._conn.commit()
+
+    async def push_sticker(self, user_id: int, file_id: str, name: str,
+                           suggested: str | None) -> None:
+        created = datetime.now(timezone.utc).isoformat()
+        await self._ensure(user_id)
+        await self._conn.execute(self._PUSH_STICKER,
+                                 (user_id, file_id, name, suggested, created))
+        await self._conn.commit()
+
+    async def head_sticker(self, user_id: int) -> QueuedSticker | None:
+        async with self._conn.execute(self._HEAD_STICKER, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return QueuedSticker(row["id"], row["user_id"], row["file_id"],
+                             row["name"], row["suggested"])
+
+    async def pop_sticker(self, sticker_id: int) -> None:
+        await self._conn.execute(self._POP_STICKER, (sticker_id,))
+        await self._conn.commit()
+
+    async def count_stickers(self, user_id: int) -> int:
+        async with self._conn.execute(self._COUNT_STICKERS, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return row["n"] if row else 0
+
+    async def clear_stickers(self, user_id: int) -> int:
+        dropped = await self.count_stickers(user_id)
+        await self._conn.execute(self._CLEAR_STICKERS, (user_id,))
+        await self._conn.commit()
+        return dropped
 
     async def emoji_for(self, user_id: int) -> str:
         async with self._conn.execute(self._GET_EMOJI, (user_id,)) as cursor:

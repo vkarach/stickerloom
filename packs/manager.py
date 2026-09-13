@@ -30,12 +30,17 @@ class PackManager:
     def link(name: str) -> str:
         return ADDSTICKERS_URL + name
 
-    async def create(self, user_id: int, title: str, path: Path, emoji: str) -> Pack:
+    async def upload(self, user_id: int, path: Path) -> str:
+        """Put the file on Telegram's servers without posting it, and keep its file_id."""
+        uploaded = await self._bot.upload_sticker_file(
+            user_id=user_id, sticker=FSInputFile(path), sticker_format=STICKER_FORMAT,
+        )
+        return uploaded.file_id
+
+    async def create(self, user_id: int, title: str, source, emoji: str) -> Pack:
         me = await self._bot.me()
         name = pack_name(title, me.username)
-        sticker = InputSticker(
-            sticker=FSInputFile(path), format=STICKER_FORMAT, emoji_list=[emoji],
-        )
+        sticker = _sticker(source, emoji)
         try:
             await self._bot.create_new_sticker_set(
                 user_id=user_id, name=name, title=title, stickers=[sticker],
@@ -48,11 +53,8 @@ class PackManager:
         await self._repo.set_active(user_id, name)
         return pack
 
-    async def add(self, user_id: int, name: str, path: Path, emoji: str) -> None:
-        sticker = InputSticker(
-            sticker=FSInputFile(path), format=STICKER_FORMAT, emoji_list=[emoji],
-        )
-        await self._push(user_id, name, sticker)
+    async def add(self, user_id: int, name: str, source, emoji: str) -> None:
+        await self._push(user_id, name, _sticker(source, emoji))
         log.info("user %s added a sticker to %s", user_id, name)
 
     async def _push(self, user_id: int, name: str, sticker: InputSticker) -> None:
@@ -103,11 +105,13 @@ class PackManager:
 
     @staticmethod
     def _copy(sticker, fallback: str) -> InputSticker:
-        return InputSticker(
-            sticker=sticker.file_id,
-            format=STICKER_FORMAT,
-            emoji_list=[sticker.emoji or fallback],
-        )
+        return _sticker(sticker.file_id, sticker.emoji or fallback)
+
+
+def _sticker(source, emoji: str) -> InputSticker:
+    """Accepts a local path or a file_id already on Telegram's servers."""
+    payload = FSInputFile(source) if isinstance(source, Path) else source
+    return InputSticker(sticker=payload, format=STICKER_FORMAT, emoji_list=[emoji])
 
 
 def _translate(exc: TelegramBadRequest, creating: bool = False) -> Exception:

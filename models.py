@@ -12,6 +12,11 @@ class MediaInfo:
     is_animated: bool
     # ffmpeg cannot decode animated webp, such a source is expanded to PNG frames first
     needs_frame_expansion: bool = False
+    codec: str = ""
+    container: str = ""
+    fps: float = 0.0
+    size: int = 0
+    has_audio: bool = False
 
 
 @dataclass(frozen=True)
@@ -30,6 +35,15 @@ class Pack:
     name: str
     title: str
     created_at: str
+
+
+@dataclass(frozen=True)
+class QueuedSticker:
+    id: int
+    user_id: int
+    file_id: str
+    name: str
+    suggested: str | None
 
 
 @dataclass

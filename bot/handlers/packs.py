@@ -1,10 +1,11 @@
 import logging
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.formatting import Bold, Code, Text, as_list
 
+from bot.handlers.session import USE_SUGGESTED, accept_emoji
 from db.packs import PackRepo
 from packs import PackError, PackManager
 from packs.emoji import is_emoji
@@ -57,8 +58,63 @@ async def cmd_newpack(message: Message, command: CommandObject, repo: PackRepo) 
 @router.message(Command("nopack"))
 async def cmd_nopack(message: Message, repo: PackRepo) -> None:
     assert message.from_user
-    await repo.clear_active(message.from_user.id)
-    await message.answer("Stopped. Files come back converted and go nowhere else.")
+    user_id = message.from_user.id
+    await repo.clear_active(user_id)
+    await repo.set_pending(user_id, None)
+    dropped = await repo.clear_stickers(user_id)
+    extra = f" Dropped {dropped} waiting for an emoji." if dropped else ""
+    await message.answer(f"Stopped. Files come back converted and go nowhere else.{extra}")
+
+
+@router.message(Command("done"))
+async def cmd_done(message: Message, repo: PackRepo) -> None:
+    assert message.from_user
+    user_id = message.from_user.id
+    name = await repo.active_for(user_id)
+    dropped = await repo.clear_stickers(user_id)
+    await repo.set_pending(user_id, None)
+    await repo.clear_active(user_id)
+
+    if not name:
+        await message.answer("Nothing was being filled.")
+        return
+
+    extra = f"\n{dropped} sticker(s) never got an emoji and were dropped." if dropped else ""
+    await message.answer(
+        f"Done. Your pack: {PackManager.link(name)}{extra}\n"
+        "/newpack starts another, /mypacks picks one up again.",
+        link_preview_options={"is_disabled": True},
+    )
+
+
+@router.callback_query(lambda c: c.data == USE_SUGGESTED)
+async def use_suggested(callback: CallbackQuery, repo: PackRepo, packs: PackManager) -> None:
+    assert callback.from_user
+    user_id = callback.from_user.id
+    sticker = await repo.head_sticker(user_id)
+    if sticker is None:
+        await callback.answer("Nothing is waiting")
+        return
+
+    emoji = sticker.suggested or await repo.emoji_for(user_id)
+    await callback.answer(emoji)
+    if isinstance(callback.message, Message):
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await accept_emoji(callback.message, user_id, emoji, repo, packs)
+
+
+@router.message(F.text, ~F.text.startswith("/"))
+async def emoji_reply(message: Message, repo: PackRepo, packs: PackManager) -> None:
+    assert message.from_user and message.text
+    user_id = message.from_user.id
+    if await repo.head_sticker(user_id) is None:
+        return
+
+    if not is_emoji(message.text):
+        await message.answer("Send just the emoji, or tap the button above.")
+        return
+
+    await accept_emoji(message, user_id, message.text.strip(), repo, packs)
 
 
 @router.message(Command("mypacks"))
