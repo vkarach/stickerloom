@@ -18,6 +18,9 @@ class FakeSticker:
     def __init__(self, file_id, emoji):
         self.file_id = file_id
         self.emoji = emoji
+        self.file_unique_id = file_id + "u"
+        self.is_video = True
+        self.is_animated = False
 
 
 class FakeSet:
@@ -74,16 +77,18 @@ def sticker_file(tmp_path):
 
 async def test_creating_a_pack_uses_the_bot_suffix(repo, sticker_file):
     bot = FakeBot()
-    pack = await PackManager(bot, repo).create(ALICE, "My Pack", sticker_file, "\U0001f525")
+    pack, added = await PackManager(bot, repo).create(
+        ALICE, "mypack", "My Pack", [(sticker_file, "\U0001f525")])
 
-    assert pack.name.endswith(f"_by_{BOT_NAME}")
+    assert pack.name == f"mypack_by_{BOT_NAME}"
     assert pack.title == "My Pack"
+    assert added == 1
     assert bot.calls[0][0] == "create"
 
 
 async def test_a_created_pack_is_remembered_and_made_active(repo, sticker_file):
     manager = PackManager(FakeBot(), repo)
-    pack = await manager.create(ALICE, "My Pack", sticker_file, "\U0001f525")
+    pack, _ = await manager.create(ALICE, "mypack", "My Pack", [(sticker_file, "\U0001f525")])
 
     assert [p.name for p in await repo.list_for(ALICE)] == [pack.name]
     assert await repo.active_for(ALICE) == pack.name
@@ -91,7 +96,8 @@ async def test_a_created_pack_is_remembered_and_made_active(repo, sticker_file):
 
 async def test_the_first_sticker_carries_the_emoji(repo, sticker_file):
     bot = FakeBot()
-    await PackManager(bot, repo).create(ALICE, "My Pack", sticker_file, "\U0001f525")
+    await PackManager(bot, repo).create(
+        ALICE, "mypack", "My Pack", [(sticker_file, "\U0001f525")])
 
     stickers = bot.calls[0][1]["stickers"]
     assert len(stickers) == 1
@@ -124,24 +130,26 @@ async def test_a_full_pack_is_reported_as_full(repo, sticker_file):
 async def test_an_occupied_name_is_reported(repo, sticker_file):
     bot = FakeBot(raises={"create": "Bad Request: sticker set name is already occupied"})
     with pytest.raises(NameTaken):
-        await PackManager(bot, repo).create(ALICE, "My Pack", sticker_file, "\U0001f525")
+        await PackManager(bot, repo).create(
+            ALICE, "mypack", "My Pack", [(sticker_file, "\U0001f525")])
 
 
 async def test_importing_copies_every_sticker_with_its_emoji(repo):
     source = FakeSet([FakeSticker(f"fid{i}", "\U0001f600") for i in range(3)])
     bot = FakeBot(source=source)
 
-    pack = await PackManager(bot, repo).import_set(ALICE, "tiktok", "Copied")
+    pack, copied = await PackManager(bot, repo).import_set(ALICE, "tiktok", "copy", "Copied")
 
     created = [c for c in bot.calls if c[0] == "create"][0][1]
     assert len(created["stickers"]) == 3
     assert [s.sticker for s in created["stickers"]] == ["fid0", "fid1", "fid2"]
-    assert await repo.active_for(ALICE) == pack.name
+    assert copied == 3
+    assert pack.name == f"copy_by_{BOT_NAME}"
 
 
 async def test_importing_falls_back_when_a_source_sticker_has_no_emoji(repo):
     bot = FakeBot(source=FakeSet([FakeSticker("fid0", None)]))
-    await PackManager(bot, repo).import_set(ALICE, "tiktok", "Copied")
+    await PackManager(bot, repo).import_set(ALICE, "tiktok", "copy", "Copied")
 
     created = [c for c in bot.calls if c[0] == "create"][0][1]
     assert created["stickers"][0].emoji_list == [await repo.emoji_for(ALICE)]
@@ -151,7 +159,7 @@ async def test_a_large_source_is_created_then_topped_up(repo):
     source = FakeSet([FakeSticker(f"fid{i}", "\U0001f600") for i in range(MAX_INITIAL + 7)])
     bot = FakeBot(source=source)
 
-    await PackManager(bot, repo).import_set(ALICE, "big", "Copied")
+    await PackManager(bot, repo).import_set(ALICE, "big", "copy", "Copied")
 
     created = [c for c in bot.calls if c[0] == "create"]
     added = [c for c in bot.calls if c[0] == "add"]
@@ -163,13 +171,13 @@ async def test_a_large_source_is_created_then_topped_up(repo):
 async def test_importing_an_unknown_set_says_so(repo):
     bot = FakeBot(raises={"get": "Bad Request: STICKERSET_INVALID"})
     with pytest.raises(PackNotFound):
-        await PackManager(bot, repo).import_set(ALICE, "nope", "Copied")
+        await PackManager(bot, repo).import_set(ALICE, "nope", "copy", "Copied")
 
 
 async def test_importing_an_empty_set_says_so(repo):
     bot = FakeBot(source=FakeSet([]))
     with pytest.raises(PackNotFound):
-        await PackManager(bot, repo).import_set(ALICE, "empty", "Copied")
+        await PackManager(bot, repo).import_set(ALICE, "empty", "copy", "Copied")
 
 
 def test_the_link_points_at_telegram():

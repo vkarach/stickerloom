@@ -47,6 +47,9 @@ class PackRepo:
     _SET_EDITING = "UPDATE users SET editing = ? WHERE user_id = ?"
     _GET_EDITING = "SELECT editing FROM users WHERE user_id = ?"
 
+    _SET_LANG = "UPDATE users SET lang = ? WHERE user_id = ?"
+    _GET_LANG = "SELECT lang FROM users WHERE user_id = ?"
+
     _SET_EMOJI = "UPDATE users SET emoji = ? WHERE user_id = ?"
     _GET_EMOJI = "SELECT emoji FROM users WHERE user_id = ?"
 
@@ -212,6 +215,16 @@ class PackRepo:
         async with self._conn.execute(self._GET_EDITING, (user_id,)) as cursor:
             row = await cursor.fetchone()
         return row["editing"] if row else None
+
+    async def set_lang(self, user_id: int, lang: str) -> None:
+        await self._ensure(user_id)
+        await self._conn.execute(self._SET_LANG, (lang, user_id))
+        await self._conn.commit()
+
+    async def lang_for(self, user_id: int) -> str | None:
+        async with self._conn.execute(self._GET_LANG, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return row["lang"] if row else None
 
     async def set_emoji(self, user_id: int, emoji: str) -> None:
         await self._ensure(user_id)

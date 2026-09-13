@@ -9,6 +9,7 @@ from aiogram.types import FSInputFile, Message
 from bot.handlers.offer import offer_keyboard
 from bot.handlers.session import ask_for_emoji
 from db.packs import PackRepo
+from i18n import Translator
 from packs import PackManager
 
 from convert.errors import StickerloomError, UnsupportedInput
@@ -27,8 +28,6 @@ log = logging.getLogger(__name__)
 router = Router()
 
 MEDIA = F.document | F.photo | F.sticker | F.animation | F.video | F.video_note
-
-TGS_HINT = "Animated stickers already work in a pack, nothing to convert."
 
 # a file from the GIF panel arrives with a caption for a name, or with none
 BY_MIME = {
@@ -72,7 +71,7 @@ def _source(message: Message) -> Source:
     if message.sticker:
         sticker = message.sticker
         if sticker.is_animated:
-            raise UnsupportedInput(TGS_HINT)
+            raise UnsupportedInput("error.tgs")
         suffix = ".webm" if sticker.is_video else ".webp"
         return Source(sticker.file_id, f"sticker{suffix}", sticker.file_size or 0, sticker.emoji)
     if message.animation:
@@ -86,26 +85,28 @@ def _source(message: Message) -> Source:
     if message.video_note:
         note = message.video_note
         return Source(note.file_id, "video_note.mp4", note.file_size or 0)
-    raise UnsupportedInput("Send a picture, sticker, GIF or short video.")
+    raise UnsupportedInput("error.send_media")
 
 
 def _validate(name: str, size: int) -> None:
     suffix = Path(name).suffix.lower()
     if suffix in REJECTED_EXTENSIONS:
-        raise UnsupportedInput(TGS_HINT)
+        raise UnsupportedInput("error.tgs")
     if suffix not in SUPPORTED_EXTENSIONS:
-        listed = ", ".join(sorted(SUPPORTED_EXTENSIONS))
-        raise UnsupportedInput(f"Cannot read {suffix or 'that'}. Supported: {listed}")
+        kinds = ", ".join(sorted(SUPPORTED_EXTENSIONS))
+        key = "error.unsupported" if suffix else "error.unsupported_unknown"
+        raise UnsupportedInput(key, suffix=suffix, kinds=kinds)
     if size > MAX_SOURCE_BYTES:
-        raise UnsupportedInput(f"Too big, limit is {MAX_SOURCE_BYTES // (1024 * 1024)} MB.")
+        raise UnsupportedInput("error.too_big", mb=MAX_SOURCE_BYTES // (1024 * 1024))
 
 
-def _caption(result: ConvertResult, emoji: str | None) -> str:
+def _caption(result: ConvertResult, emoji: str | None, t: Translator) -> str:
     """The emoji rides along with the file, so a batch of answers stays paired up."""
-    lead = f"{emoji} " if emoji else ""
     # a still is a clip only because Telegram wants one, its length says nothing
-    length = f"{result.duration:.1f}s - " if result.duration > STILL_DURATION else ""
-    return f"{lead}{result.width}x{result.height} - {length}{result.size // 1024} KB"
+    key = "caption.clip" if result.duration > STILL_DURATION else "caption.still"
+    body = t(key, width=result.width, height=result.height,
+             seconds=f"{result.duration:.1f}", kb=result.size // 1024)
+    return f"{emoji} {body}" if emoji else body
 
 
 async def _in_pack_mode(user_id: int, repo: PackRepo) -> bool:
@@ -113,17 +114,18 @@ async def _in_pack_mode(user_id: int, repo: PackRepo) -> bool:
 
 
 async def _queue_for_pack(message: Message, user_id: int, spot: int, name: str,
-                          result: ConvertResult, repo: PackRepo, packs: PackManager) -> None:
+                          result: ConvertResult, repo: PackRepo, packs: PackManager,
+                          t: Translator) -> None:
     """Fill in the reserved queue slot, then ask about it if it is the one in turn."""
     try:
         file_id = await packs.upload(user_id, result.path)
     except Exception:
         log.exception("could not upload %r for user %s", name, user_id)
         await repo.pop_sticker(spot)
-        await message.answer("Telegram rejected that file.")
+        await message.answer(t("convert.rejected"))
     else:
         await repo.attach(spot, file_id, _sha(result.path))
-    await ask_for_emoji(message, user_id, repo)
+    await ask_for_emoji(message, user_id, repo, t)
 
 
 def _sha(path: Path) -> str:
@@ -137,7 +139,7 @@ def _sha(path: Path) -> str:
 
 @router.message(MEDIA)
 async def handle_media(message: Message, bot: Bot, queue: JobQueue,
-                       repo: PackRepo, packs: PackManager) -> None:
+                       repo: PackRepo, packs: PackManager, t: Translator) -> None:
     assert message.from_user
     user_id = message.from_user.id
 
@@ -145,7 +147,7 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
         source = _source(message)
         _validate(source.name, source.size)
     except StickerloomError as exc:
-        await message.answer(str(exc))
+        await message.answer(t(exc.key, **exc.params))
         return
 
     name = source.name
@@ -153,7 +155,7 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
     spot = None
     if await _in_pack_mode(user_id, repo):
         spot = await repo.push_sticker(user_id, None, name, source.emoji, message.message_id)
-    status = await message.answer(f"{name}: queued")
+    status = await message.answer(t("convert.queued", name=name))
 
     async def fetch(work_dir: Path) -> Path:
         target = work_dir / name
@@ -161,34 +163,34 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
         return target
 
     async def on_status(_: str) -> None:
-        await _edit(status, f"{name}: converting")
+        await _edit(status, t("convert.converting", name=name))
 
     async def on_done(result: ConvertResult) -> None:
         await _delete(status)
         if spot is not None:
-            await _queue_for_pack(message, user_id, spot, name, result, repo, packs)
+            await _queue_for_pack(message, user_id, spot, name, result, repo, packs, t)
             return
 
         document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
-        await message.answer_document(document, caption=_caption(result, source.emoji),
-                                      reply_markup=offer_keyboard())
+        await message.answer_document(document, caption=_caption(result, source.emoji, t),
+                                      reply_markup=offer_keyboard(t))
 
     async def on_error(exc: Exception) -> None:
         if spot is not None:
             await repo.pop_sticker(spot)
-            await ask_for_emoji(message, user_id, repo)
+            await ask_for_emoji(message, user_id, repo, t)
         if isinstance(exc, StickerloomError):
-            await _edit(status, f"{name}: {exc}")
+            await _edit(status, t("convert.failed", name=name, reason=t(exc.key, **exc.params)))
             return
         log.exception("unexpected failure converting %r", name)
-        await _edit(status, f"{name}: something went wrong")
+        await _edit(status, t("convert.crashed", name=name))
 
     position = await queue.submit(Job(
         key=user_id, name=name, fetch=fetch,
         on_status=on_status, on_done=on_done, on_error=on_error,
     ))
     if position > 1:
-        await _edit(status, f"{name}: queued, {position} in line")
+        await _edit(status, t("convert.queued_position", name=name, n=position))
 
 
 async def _edit(status: Message, text: str) -> None:

@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
     editing        TEXT,
     importing      TEXT,
     deleting       TEXT,
-    editing_pack   TEXT
+    editing_pack   TEXT,
+    lang           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS packs (

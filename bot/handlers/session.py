@@ -6,6 +6,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from db.packs import PackRepo
+from i18n import Translator
 from packs import PackError, PackManager
 
 log = logging.getLogger(__name__)
@@ -15,10 +16,10 @@ ADD_ANYWAY = "dup:add"
 SKIP_DUPLICATE = "dup:skip"
 
 
-def duplicate_keyboard() -> InlineKeyboardMarkup:
+def duplicate_keyboard(t: Translator) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Add anyway", callback_data=ADD_ANYWAY),
-        InlineKeyboardButton(text="Skip", callback_data=SKIP_DUPLICATE),
+        InlineKeyboardButton(text=t("dup.add_anyway"), callback_data=ADD_ANYWAY),
+        InlineKeyboardButton(text=t("dup.skip"), callback_data=SKIP_DUPLICATE),
     ]])
 
 
@@ -31,18 +32,21 @@ async def is_duplicate(user_id: int, sticker, name: str | None, repo: PackRepo) 
     return sticker.sha in await repo.queued_shas(user_id, sticker.id)
 
 
-def prompt_keyboard(suggested: str) -> InlineKeyboardMarkup:
+def prompt_keyboard(suggested: str, t: Translator) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=f"Click to {suggested}", callback_data=USE_SUGGESTED),
+        InlineKeyboardButton(text=t("sticker.button", emoji=suggested),
+                             callback_data=USE_SUGGESTED),
     ]])
 
 
-def prompt_text(waiting: int) -> str:
-    queued = f" {waiting - 1} more." if waiting > 1 else ""
-    return f"Sticker accepted. Send an emoji.{queued}"
+def prompt_text(waiting: int, t: Translator) -> str:
+    if waiting > 1:
+        return t("sticker.accepted_more", n=waiting - 1)
+    return t("sticker.accepted")
 
 
-async def ask_for_emoji(message: Message, user_id: int, repo: PackRepo) -> bool:
+async def ask_for_emoji(message: Message, user_id: int, repo: PackRepo,
+                        t: Translator) -> bool:
     """Ask about the sticker at the head of the queue, quoting the file it came from."""
     sticker = await repo.head_sticker(user_id)
     if sticker is None or sticker.file_id is None or sticker.prompt_msg is not None:
@@ -53,8 +57,8 @@ async def ask_for_emoji(message: Message, user_id: int, repo: PackRepo) -> bool:
 
     suggested = sticker.suggested or await repo.emoji_for(user_id)
     waiting = await repo.count_stickers(user_id)
-    text = prompt_text(waiting)
-    keyboard = prompt_keyboard(suggested)
+    text = prompt_text(waiting, t)
+    keyboard = prompt_keyboard(suggested, t)
     try:
         try:
             sent = await message.answer(text, reply_markup=keyboard,
@@ -69,44 +73,45 @@ async def ask_for_emoji(message: Message, user_id: int, repo: PackRepo) -> bool:
 
 
 async def accept_emoji(message: Message, user_id: int, emoji: str,
-                       repo: PackRepo, packs: PackManager) -> None:
+                       repo: PackRepo, packs: PackManager, t: Translator) -> None:
     """Give the waiting sticker its emoji, then move on to the next one."""
     sticker = await repo.head_sticker(user_id)
     if sticker is None:
-        await message.answer("Send a file first.")
+        await message.answer(t("sticker.none_waiting"))
         return
 
     name = await repo.active_for(user_id)
     if await is_duplicate(user_id, sticker, name, repo):
         await repo.mark_duplicate(sticker.id, emoji)
-        if not await _mark(message, sticker, "Already in this pack.", duplicate_keyboard()):
-            await message.answer("Already in this pack.", reply_markup=duplicate_keyboard())
+        warning, keys = t("dup.warn"), duplicate_keyboard(t)
+        if not await _mark(message, sticker, warning, keys):
+            await message.answer(warning, reply_markup=keys)
         return
     if name:
         # an existing pack takes stickers straight away, a new one is only built on /done
         try:
             await packs.add(user_id, name, sticker.file_id, emoji)
         except PackError as exc:
-            await message.answer(str(exc))
+            await message.answer(t(exc.key, **exc.params))
             return
         except Exception:
             log.exception("could not add a sticker for user %s", user_id)
-            await message.answer("Failed. Send the emoji again.")
+            await message.answer(t("sticker.add_failed"))
             return
         await repo.pop_sticker(sticker.id)
         await repo.remember_sha(name, sticker.sha)
     else:
         await repo.name_sticker(sticker.id, emoji)
 
-    await _mark(message, sticker, f"{emoji} added.")
-    if await ask_for_emoji(message, user_id, repo):
+    await _mark(message, sticker, t("sticker.added", emoji=emoji))
+    if await ask_for_emoji(message, user_id, repo, t):
         return
     if await repo.count_stickers(user_id) == 0:
-        await message.answer("Send another or /done.")
+        await message.answer(t("sticker.send_another"))
 
 
 async def resolve_duplicate(message: Message, user_id: int, keep: bool,
-                            repo: PackRepo, packs: PackManager) -> None:
+                            repo: PackRepo, packs: PackManager, t: Translator) -> None:
     """Answer the Add anyway / Skip question about the sticker held aside."""
     sticker = await repo.first_duplicate(user_id)
     if sticker is None:
@@ -114,7 +119,7 @@ async def resolve_duplicate(message: Message, user_id: int, keep: bool,
 
     if not keep:
         await repo.pop_sticker(sticker.id)
-        await _mark(message, sticker, "Skipped.")
+        await _mark(message, sticker, t("sticker.skipped"))
     else:
         name = await repo.active_for(user_id)
         if name:
@@ -122,18 +127,18 @@ async def resolve_duplicate(message: Message, user_id: int, keep: bool,
                 await packs.add(user_id, name, sticker.file_id, sticker.emoji)
             except Exception as exc:
                 log.warning("could not add a duplicate for user %s: %s", user_id, exc)
-                await message.answer("Failed. Send the emoji again.")
+                await message.answer(t("sticker.add_failed"))
                 return
             await repo.pop_sticker(sticker.id)
             await repo.remember_sha(name, sticker.sha)
         else:
             await repo.clear_duplicate(sticker.id)
-        await _mark(message, sticker, f"{sticker.emoji} added.")
+        await _mark(message, sticker, t("sticker.added", emoji=sticker.emoji))
 
-    if await ask_for_emoji(message, user_id, repo):
+    if await ask_for_emoji(message, user_id, repo, t):
         return
     if await repo.count_stickers(user_id) == 0:
-        await message.answer("Send another or /done.")
+        await message.answer(t("sticker.send_another"))
 
 
 async def _mark(message: Message, sticker, text: str,

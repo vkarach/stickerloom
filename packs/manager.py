@@ -134,14 +134,14 @@ class PackManager:
         try:
             return await self._bot.get_sticker_set(name=name)
         except TelegramBadRequest as exc:
-            raise PackNotFound(f"No pack called {name}.") from exc
+            raise PackNotFound("import.not_found", name=name) from exc
 
     async def import_set(self, user_id: int, source_name: str, base: str,
                          title: str) -> tuple[Pack, int]:
         source = await self.look_up(source_name)
         stickers = list(source.stickers or [])
         if not stickers:
-            raise PackNotFound(f"{source_name} is empty.")
+            raise PackNotFound("error.pack_empty", name=source_name)
 
         fallback = await self._repo.emoji_for(user_id)
         me = await self._bot.me()
@@ -194,11 +194,11 @@ def _emoji_list(emoji: str) -> list[str]:
 def _translate(exc: TelegramBadRequest, creating: bool = False) -> Exception:
     message = exc.message.upper()
     if "TOO_MUCH" in message or "TOO MUCH" in message:
-        return PackFull("Pack is full. /newpack starts another.")
+        return PackFull("error.pack_full")
     if "OCCUPIED" in message:
-        return NameTaken("Prefix taken. Send another.")
+        return NameTaken("prefix.taken")
     if "STICKERSET_INVALID" in message:
         if creating:
-            return NameTaken("Telegram refused that prefix. Send another.")
-        return PackNotOurs("This bot can only edit packs it made. Copy it with /import.")
+            return NameTaken("prefix.refused")
+        return PackNotOurs("error.not_ours")
     return exc

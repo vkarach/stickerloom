@@ -12,7 +12,7 @@ def test_a_sane_prefix_is_accepted(base):
 
 @pytest.mark.parametrize("base", [
     "", "1cats", "_cats", "cats_", "double__underscore", "with space",
-    "кошки", "dots.and,commas!", "x" * (room_for(BOT) + 1),
+    "\u043a\u043e\u0448\u043a\u0438", "dots.and,commas!", "x" * (room_for(BOT) + 1),
 ])
 def test_a_bad_prefix_is_explained(base):
     assert check_base(base, BOT)

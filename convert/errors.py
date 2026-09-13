@@ -1,5 +1,10 @@
 class StickerloomError(Exception):
-    """Base for failures whose message is safe to show the user."""
+    """A failure the user may see: it carries the key of the text, not the text."""
+
+    def __init__(self, key: str, **params):
+        super().__init__(key)
+        self.key = key
+        self.params = params
 
 
 class UnsupportedInput(StickerloomError):
@@ -19,6 +24,6 @@ class EncodeFailed(StickerloomError):
 
 
 class CannotFitSizeLimit(StickerloomError):
-    def __init__(self, message: str, smallest: int):
-        super().__init__(message)
+    def __init__(self, key: str, smallest: int, **params):
+        super().__init__(key, **params)
         self.smallest = smallest

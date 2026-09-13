@@ -4,46 +4,52 @@ from aiogram.types import BotCommand
 from aiogram.utils.formatting import BotCommand as CommandText
 from aiogram.utils.formatting import Bold, Text, as_list, as_marked_section
 
+from i18n import Translator
+
 
 @dataclass(frozen=True)
 class CommandSpec:
     name: str
-    description: str
-    group: str = "General"
+    group: str = "group.general"
     hidden: bool = False
+
+    @property
+    def description(self) -> str:
+        return f"cmd.{self.name}"
 
 
 COMMANDS: tuple[CommandSpec, ...] = (
-    CommandSpec("start", "What this bot does"),
-    CommandSpec("help", "Show all commands"),
-    CommandSpec("cancel", "Stop whatever is in progress"),
+    CommandSpec("start"),
+    CommandSpec("help"),
+    CommandSpec("cancel"),
+    CommandSpec("lang"),
 
-    CommandSpec("newpack", "Start a pack", group="Packs"),
-    CommandSpec("done", "Finish the pack", group="Packs"),
-    CommandSpec("mypacks", "Your packs", group="Packs"),
-    CommandSpec("import", "Copy someone's pack into your own", group="Packs"),
-    CommandSpec("emoji", "Default emoji", group="Packs"),
+    CommandSpec("newpack", group="group.packs"),
+    CommandSpec("done", group="group.packs"),
+    CommandSpec("mypacks", group="group.packs"),
+    CommandSpec("import", group="group.packs"),
+    CommandSpec("emoji", group="group.packs"),
 
-    CommandSpec("format", "What the output looks like", group="Reference"),
+    CommandSpec("format", group="group.reference"),
 )
 
 BY_NAME: dict[str, CommandSpec] = {c.name: c for c in COMMANDS}
 
 
-def menu() -> list[BotCommand]:
+def menu(t: Translator) -> list[BotCommand]:
     return [
-        BotCommand(command=c.name, description=c.description)
+        BotCommand(command=c.name, description=t(c.description))
         for c in COMMANDS if not c.hidden
     ]
 
 
-def help_content() -> Text:
+def help_content(t: Translator) -> Text:
     sections = []
     for group in dict.fromkeys(c.group for c in COMMANDS):
         rows = [
-            Text(CommandText(f"/{c.name}"), " : ", c.description)
+            Text(CommandText(f"/{c.name}"), " : ", t(c.description))
             for c in COMMANDS if c.group == group and not c.hidden
         ]
         if rows:
-            sections.append(as_marked_section(Bold(group), *rows, marker="- "))
+            sections.append(as_marked_section(Bold(t(group)), *rows, marker="- "))
     return as_list(*sections, sep="\n\n")

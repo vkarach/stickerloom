@@ -42,6 +42,18 @@ expanded into frames before encoding.
 Scaling is lanczos, except for a drawn source whose first frame holds 64 colors
 or fewer: pixel art is scaled with nearest neighbour, which keeps its edges.
 
+## Language
+
+Every user-facing string lives in `locales/<lang>.json` and is looked up by key;
+nothing is spelled out in the handlers. `en.json` is the reference: a locale
+that gains or loses a key against it stops the bot at startup. A value may be a
+list of forms when it carries a count, and the form is chosen by the language's
+own plural rule.
+
+A user is answered in the language he picked with `/lang`, else in the one
+Telegram reports, else in English. The command menu is registered once per
+language, so the `/` list is translated too.
+
 ## Environment
 
 `.env` in the project root:

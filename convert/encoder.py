@@ -90,11 +90,8 @@ async def encode(src: Path, dst: Path, info: MediaInfo, work_dir: Path | None = 
                 duration=output_duration(info), size=size, attempts=attempt,
             )
 
-    raise CannotFitSizeLimit(
-        f"Will not fit {MAX_BYTES // 1024} KB, best was {(smallest or 0) // 1024} KB. "
-        "Try something shorter.",
-        smallest or 0,
-    )
+    raise CannotFitSizeLimit("error.too_heavy", smallest or 0,
+                             kb=MAX_BYTES // 1024, best=(smallest or 0) // 1024)
 
 
 async def _run(args: list[str]) -> None:
@@ -106,4 +103,4 @@ async def _run(args: list[str]) -> None:
         detail = stderr.decode(errors="replace").strip().splitlines()
         log.error("ffmpeg failed: %s", detail[-1] if detail else "no output")
         log.error("ffmpeg call was: %s", " ".join(args))
-        raise EncodeFailed("Could not convert that file.")
+        raise EncodeFailed("error.encode")

@@ -16,17 +16,17 @@ def room_for(bot_username: str) -> int:
     return MAX_NAME - len(suffix_for(bot_username))
 
 
-def check_base(base: str, bot_username: str) -> str | None:
-    """Return why this prefix is unusable, or None when it is fine."""
+def check_base(base: str, bot_username: str) -> tuple[str, dict] | None:
+    """Return the key of why this prefix is unusable, or None when it is fine."""
     room = room_for(bot_username)
     if not base:
-        return "Send a prefix for the link."
+        return "prefix.empty", {}
     if len(base) > room:
-        return f"Too long, keep it to {room} characters."
+        return "prefix.too_long", {"room": room}
     if not _BASE.match(base):
-        return "Letters, digits and underscores only, starting with a letter."
+        return "prefix.charset", {}
     if "__" in base or base.endswith("_"):
-        return "No doubled or trailing underscores."
+        return "prefix.underscores", {}
     return None
 
 

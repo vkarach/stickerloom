@@ -1,5 +1,10 @@
 class PackError(Exception):
-    """Base for pack failures whose message is safe to show the user."""
+    """A pack failure the user may see: it carries the key of the text, not the text."""
+
+    def __init__(self, key: str, **params):
+        super().__init__(key)
+        self.key = key
+        self.params = params
 
 
 class PackNotOurs(PackError):

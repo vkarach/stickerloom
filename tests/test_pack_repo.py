@@ -85,17 +85,23 @@ async def test_packs_come_back_newest_last(repo):
     assert [p.name for p in await repo.list_for(ALICE)] == ["p0_by_bot", "p1_by_bot", "p2_by_bot"]
 
 
-async def test_the_awaiting_title_flag_round_trips(repo):
-    assert await repo.is_awaiting_title(ALICE) is False
-    await repo.set_awaiting_title(ALICE, True)
-    assert await repo.is_awaiting_title(ALICE) is True
-    await repo.set_awaiting_title(ALICE, False)
-    assert await repo.is_awaiting_title(ALICE) is False
+async def test_what_the_bot_is_asking_round_trips(repo):
+    assert await repo.asking_for(ALICE) is None
+    await repo.set_asking(ALICE, "prefix")
+    assert await repo.asking_for(ALICE) == "prefix"
+    await repo.set_asking(ALICE, None)
+    assert await repo.asking_for(ALICE) is None
 
 
-async def test_the_flag_is_per_user(repo):
-    await repo.set_awaiting_title(ALICE, True)
-    assert await repo.is_awaiting_title(BOB) is False
+async def test_what_is_asked_is_per_user(repo):
+    await repo.set_asking(ALICE, "title")
+    assert await repo.asking_for(BOB) is None
+
+
+async def test_the_chosen_language_round_trips(repo):
+    assert await repo.lang_for(ALICE) is None
+    await repo.set_lang(ALICE, "ru")
+    assert await repo.lang_for(ALICE) == "ru"
 
 
 async def test_an_older_database_gains_the_new_column(tmp_path, monkeypatch):
@@ -115,7 +121,8 @@ async def test_an_older_database_gains_the_new_column(tmp_path, monkeypatch):
     conn = await connect()
     try:
         migrated = PackRepo(conn)
-        assert await migrated.is_awaiting_title(1) is False
+        assert await migrated.asking_for(1) is None
+        assert await migrated.lang_for(1) is None
         assert await migrated.emoji_for(1) == "\U0001f525"
     finally:
         await conn.close()

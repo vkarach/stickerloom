@@ -6,7 +6,11 @@ from aiogram.types import Chat, Document, Message, PhotoSize, Sticker
 from bot.handlers.convert import _caption, _source, _validate
 from convert.errors import UnsupportedInput
 from convert.spec import MAX_SOURCE_BYTES
+from i18n import Translator, load
 from models import ConvertResult
+
+load()
+ENGLISH = Translator()
 
 
 @pytest.mark.parametrize("name", ["a.png", "A.PNG", "clip.mp4", "sticker.webp", "loop.gif"])
@@ -21,13 +25,15 @@ def test_unsupported_files_are_rejected(name):
 
 
 def test_tgs_gets_its_own_explanation():
-    with pytest.raises(UnsupportedInput, match="already work"):
+    with pytest.raises(UnsupportedInput) as raised:
         _validate("pack.tgs", 1024)
+    assert raised.value.key == "error.tgs"
 
 
 def test_oversized_source_is_rejected_before_download():
-    with pytest.raises(UnsupportedInput, match="Too big"):
+    with pytest.raises(UnsupportedInput) as raised:
         _validate("big.mp4", MAX_SOURCE_BYTES + 1)
+    assert raised.value.key == "error.too_big"
 
 
 def test_source_at_the_limit_is_allowed():
@@ -37,7 +43,7 @@ def test_source_at_the_limit_is_allowed():
 def test_caption_reports_the_real_result(tmp_path):
     result = ConvertResult(path=tmp_path / "x.webm", width=512, height=374,
                            duration=1.0, size=41 * 1024, attempts=1)
-    assert _caption(result) == "512x374 - 1.0s - 41 KB"
+    assert _caption(result, None, ENGLISH) == "512x374 - 1.0s - 41 KB"
 
 
 def _message(**payload):

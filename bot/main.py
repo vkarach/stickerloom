@@ -10,6 +10,7 @@ from bot.handlers import router
 from bot.setup import setup_commands
 from convert.queue import JobQueue
 from db import PackRepo, connect
+from i18n import load as load_locales
 from logging_config import setup_logging
 from packs import PackManager
 
@@ -29,6 +30,7 @@ async def main() -> None:
     setup_logging()
     load_dotenv()
     check_binaries()
+    load_locales()
 
     queue = JobQueue(workers=WORKERS)
     conn = await connect()

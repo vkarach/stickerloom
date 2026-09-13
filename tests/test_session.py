@@ -1,10 +1,14 @@
 import pytest
 
 from bot.handlers.session import prompt_keyboard, prompt_text
+from i18n import Translator, load
 from convert.spec import conforms
 from db.connection import connect
 from db.packs import PackRepo
 from models import MediaInfo
+
+load()
+ENGLISH = Translator()
 
 ALICE = 1
 
@@ -78,10 +82,10 @@ async def test_peeking_at_a_pending_title_does_not_consume_it(repo):
 
 
 def test_the_button_offers_the_suggested_emoji():
-    button = prompt_keyboard("\U0001f631").inline_keyboard[0][0]
+    button = prompt_keyboard("\U0001f631", ENGLISH).inline_keyboard[0][0]
     assert button.text == "Click to \U0001f631"
 
 
 def test_the_prompt_mentions_the_backlog():
-    assert "more" not in prompt_text(waiting=1)
-    assert "2 more" in prompt_text(waiting=3)
+    assert "more" not in prompt_text(1, ENGLISH)
+    assert "2 more" in prompt_text(3, ENGLISH)

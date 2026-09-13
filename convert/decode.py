@@ -22,7 +22,7 @@ def inspect_webp(path: Path) -> tuple[int, int, int, float]:
             duration = _total_duration(image) if frames > 1 else 0.0
             return image.width, image.height, frames, duration
     except OSError as exc:
-        raise ProbeFailed("Could not read that image.") from exc
+        raise ProbeFailed("error.unreadable_image") from exc
 
 
 def expand_frames(path: Path, out_dir: Path) -> tuple[str, float]:
@@ -36,7 +36,7 @@ def expand_frames(path: Path, out_dir: Path) -> tuple[str, float]:
                 count = index
             duration = _total_duration(image)
     except OSError as exc:
-        raise ProbeFailed("Could not read that image.") from exc
+        raise ProbeFailed("error.unreadable_image") from exc
 
     fps = min(FPS, count / duration) if duration > 0 else FPS
     log.debug("expanded %s into %d frames at %.2f fps", path.name, count, fps)

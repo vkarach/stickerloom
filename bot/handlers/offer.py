@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from bot.handlers.session import ask_for_emoji
 from db.packs import PackRepo
+from i18n import Translator
 from packs.emoji import is_emoji
 from packs.names import tag_for
 
@@ -21,33 +22,33 @@ NEW = "offer:new"
 CLOSE = "offer:close"
 
 
-def offer_keyboard() -> InlineKeyboardMarkup:
+def offer_keyboard(t: Translator) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Add to a pack", callback_data=OFFER),
+        InlineKeyboardButton(text=t("offer.add"), callback_data=OFFER),
     ]])
 
 
-def _picker(packs: list) -> InlineKeyboardMarkup:
+def _picker(packs: list, t: Translator) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text=pack.title, callback_data=f"{PICK}{tag_for(pack.name)}")]
             for pack in packs]
-    rows.append([InlineKeyboardButton(text="New pack", callback_data=NEW)])
-    rows.append([InlineKeyboardButton(text="Back", callback_data=CLOSE)])
+    rows.append([InlineKeyboardButton(text=t("offer.new"), callback_data=NEW)])
+    rows.append([InlineKeyboardButton(text=t("offer.back"), callback_data=CLOSE)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.callback_query(F.data == OFFER)
-async def show_packs(callback: CallbackQuery, repo: PackRepo) -> None:
+async def show_packs(callback: CallbackQuery, repo: PackRepo, t: Translator) -> None:
     assert callback.from_user
     mine = await repo.list_for(callback.from_user.id)
     await callback.answer()
-    await _show(callback, _picker(mine))
+    await _show(callback, _picker(mine, t))
 
 
 @router.callback_query(F.data == CLOSE)
-async def hide_packs(callback: CallbackQuery) -> None:
+async def hide_packs(callback: CallbackQuery, t: Translator) -> None:
     """Folding the list back is also how a pack made since it was opened shows up."""
     await callback.answer()
-    await _show(callback, offer_keyboard())
+    await _show(callback, offer_keyboard(t))
 
 
 async def _show(callback: CallbackQuery, keyboard: InlineKeyboardMarkup | None) -> None:
@@ -61,11 +62,11 @@ async def _show(callback: CallbackQuery, keyboard: InlineKeyboardMarkup | None) 
 
 
 @router.callback_query(F.data.startswith(PICK) | (F.data == NEW))
-async def take_it(callback: CallbackQuery, repo: PackRepo) -> None:
+async def take_it(callback: CallbackQuery, repo: PackRepo, t: Translator) -> None:
     assert callback.data and callback.from_user
     user_id = callback.from_user.id
     if not isinstance(callback.message, Message) or not callback.message.document:
-        await callback.answer("That file is gone")
+        await callback.answer(t("offer.file_gone"))
         return
 
     if callback.data == NEW:
@@ -75,8 +76,8 @@ async def take_it(callback: CallbackQuery, repo: PackRepo) -> None:
     else:
         pack = await repo.find_by_tag(user_id, callback.data[len(PICK):])
         if pack is None:
-            await callback.answer("That pack is gone")
-            await _show(callback, offer_keyboard())
+            await callback.answer(t("packs.gone"))
+            await _show(callback, offer_keyboard(t))
             return
         await repo.set_active(user_id, pack.name)
         await repo.set_building(user_id, False)
@@ -91,9 +92,9 @@ async def take_it(callback: CallbackQuery, repo: PackRepo) -> None:
                             _emoji_of(callback.message), callback.message.message_id)
 
     if callback.data == NEW:
-        await callback.message.answer("Send a name for the pack.")
+        await callback.message.answer(t("pack.ask_name"))
         return
-    await ask_for_emoji(callback.message, user_id, repo)
+    await ask_for_emoji(callback.message, user_id, repo, t)
 
 
 def _emoji_of(message: Message) -> str | None:
