@@ -2,7 +2,8 @@
 
 LONG_SIDE = 512
 MAX_DURATION = 3.0
-STILL_DURATION = 1.0
+# a still only has to be a valid clip; shorter keeps the file small
+STILL_DURATION = 0.1
 FPS = 30
 MAX_BYTES = 256 * 1024
 

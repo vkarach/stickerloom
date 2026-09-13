@@ -15,6 +15,7 @@ from convert.errors import StickerloomError, UnsupportedInput
 from convert.queue import JobQueue
 from convert.spec import (
     MAX_SOURCE_BYTES,
+    STILL_DURATION,
     OUTPUT_SUFFIX,
     REJECTED_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
@@ -77,8 +78,9 @@ def _validate(name: str, size: int) -> None:
 def _caption(result: ConvertResult, emoji: str | None) -> str:
     """The emoji rides along with the file, so a batch of answers stays paired up."""
     lead = f"{emoji} " if emoji else ""
-    return (f"{lead}{result.width}x{result.height} - {result.duration:.1f}s - "
-            f"{result.size // 1024} KB")
+    # a still is a clip only because Telegram wants one, its length says nothing
+    length = f"{result.duration:.1f}s - " if result.duration > STILL_DURATION else ""
+    return f"{lead}{result.width}x{result.height} - {length}{result.size // 1024} KB"
 
 
 async def _in_pack_mode(user_id: int, repo: PackRepo) -> bool:

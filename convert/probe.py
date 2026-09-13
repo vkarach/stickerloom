@@ -8,6 +8,8 @@ from models import MediaInfo
 
 log = logging.getLogger(__name__)
 
+STILL_CONTAINERS = frozenset({"image2", "jpeg_pipe", "png_pipe", "webp_pipe", "bmp_pipe"})
+
 FFPROBE_ARGS = ("-v", "error", "-show_streams", "-show_format", "-print_format", "json")
 
 
@@ -33,13 +35,15 @@ def parse_probe(payload: dict) -> MediaInfo:
 
     # ffmpeg reads animated webp as a 0x0 stream it cannot decode
     needs_expansion = width == 0 and video.get("codec_name") == "webp"
+    # a jpeg is demuxed as a one frame movie, duration and all, so the container decides
+    still = container.get("format_name", "") in STILL_CONTAINERS
 
     return MediaInfo(
         width=width,
         height=height,
         duration=duration,
         frames=frames or 1,
-        is_animated=frames > 1 or duration > 0,
+        is_animated=frames > 1 or (duration > 0 and not still),
         needs_frame_expansion=needs_expansion,
         codec=video.get("codec_name") or "",
         container=container.get("format_name") or "",
