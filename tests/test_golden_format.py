@@ -81,7 +81,7 @@ async def test_long_animation_is_trimmed(tmp_path):
 
 
 async def test_noisy_animation_is_squeezed_under_the_limit(tmp_path):
-    source = _make(tmp_path / "noise.mp4",
+    source = _make(tmp_path / "noise.mkv",
                    ["-f", "lavfi", "-i", "nullsrc=s=640x640:r=30:d=3",
                     "-vf", "geq=random(1)*255:128:128", "-c:v", "ffv1"])
     result = await _convert(tmp_path, source)
