@@ -6,7 +6,9 @@ CREATE TABLE IF NOT EXISTS users (
     asking         TEXT,
     building       INTEGER NOT NULL DEFAULT 0,
     editing        TEXT,
-    importing      TEXT
+    importing      TEXT,
+    deleting       TEXT,
+    editing_pack   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS packs (

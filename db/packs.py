@@ -35,6 +35,12 @@ class PackRepo:
     _SET_BUILDING = "UPDATE users SET building = ? WHERE user_id = ?"
     _GET_BUILDING = "SELECT building FROM users WHERE user_id = ?"
 
+    _SET_DELETING = "UPDATE users SET deleting = ? WHERE user_id = ?"
+    _GET_DELETING = "SELECT deleting FROM users WHERE user_id = ?"
+
+    _SET_EDITING_PACK = "UPDATE users SET editing_pack = ? WHERE user_id = ?"
+    _GET_EDITING_PACK = "SELECT editing_pack FROM users WHERE user_id = ?"
+
     _SET_IMPORTING = "UPDATE users SET importing = ? WHERE user_id = ?"
     _GET_IMPORTING = "SELECT importing FROM users WHERE user_id = ?"
 
@@ -49,6 +55,10 @@ class PackRepo:
         "VALUES (?, ?, ?, ?, ?, ?)"
     )
     _SET_PROMPT = "UPDATE queued_stickers SET prompt_msg = ? WHERE id = ?"
+    _CLAIM_PROMPT = (
+        "UPDATE queued_stickers SET prompt_msg = 0 WHERE id = ? AND prompt_msg IS NULL"
+    )
+    _RELEASE_PROMPT = "UPDATE queued_stickers SET prompt_msg = NULL WHERE id = ?"
     _ATTACH = "UPDATE queued_stickers SET file_id = ?, sha = ? WHERE id = ?"
 
     _REMEMBER_SHA = "INSERT INTO pack_stickers (name, sha) VALUES (?, ?) ON CONFLICT DO NOTHING"
@@ -162,6 +172,27 @@ class PackRepo:
             row = await cursor.fetchone()
         return bool(row["building"]) if row else False
 
+    async def set_deleting(self, user_id: int, name: str | None) -> None:
+        await self._ensure(user_id)
+        await self._conn.execute(self._SET_DELETING, (name, user_id))
+        await self._conn.commit()
+
+    async def deleting_for(self, user_id: int) -> str | None:
+        async with self._conn.execute(self._GET_DELETING, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return row["deleting"] if row else None
+
+    async def set_editing_pack(self, user_id: int, name: str | None) -> None:
+        """The pack whose stickers the user is picking from, by button or by sending one."""
+        await self._ensure(user_id)
+        await self._conn.execute(self._SET_EDITING_PACK, (name, user_id))
+        await self._conn.commit()
+
+    async def editing_pack_for(self, user_id: int) -> str | None:
+        async with self._conn.execute(self._GET_EDITING_PACK, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return row["editing_pack"] if row else None
+
     async def set_importing(self, user_id: int, source: str | None) -> None:
         await self._ensure(user_id)
         await self._conn.execute(self._SET_IMPORTING, (source, user_id))
@@ -213,6 +244,16 @@ class PackRepo:
     async def queued_shas(self, user_id: int, besides: int) -> set:
         async with self._conn.execute(self._QUEUED_SHAS, (user_id, besides)) as cursor:
             return {row["sha"] for row in await cursor.fetchall()}
+
+    async def claim_prompt(self, sticker_id: int) -> bool:
+        """Two finished conversions can reach the same head at once; only one may ask."""
+        cursor = await self._conn.execute(self._CLAIM_PROMPT, (sticker_id,))
+        await self._conn.commit()
+        return cursor.rowcount == 1
+
+    async def release_prompt(self, sticker_id: int) -> None:
+        await self._conn.execute(self._RELEASE_PROMPT, (sticker_id,))
+        await self._conn.commit()
 
     async def set_prompt(self, sticker_id: int, message_id: int) -> None:
         await self._conn.execute(self._SET_PROMPT, (message_id, sticker_id))

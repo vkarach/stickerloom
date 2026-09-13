@@ -67,9 +67,9 @@ class PackManager:
         log.info("user %s deleted pack %s", user_id, name)
 
     async def stickers(self, name: str) -> list:
-        """Every sticker in the set as (file_id, emoji)."""
+        """Every sticker in the set as (file_id, emoji, file_unique_id)."""
         found = await self._bot.get_sticker_set(name=name)
-        return [(s.file_id, s.emoji or "") for s in found.stickers or []]
+        return [(s.file_id, s.emoji or "", s.file_unique_id) for s in found.stickers or []]
 
     async def retag(self, file_id: str, emoji: str) -> None:
         try:

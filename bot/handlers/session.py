@@ -48,15 +48,22 @@ async def ask_for_emoji(message: Message, user_id: int, repo: PackRepo) -> bool:
     if sticker is None or sticker.file_id is None or sticker.prompt_msg is not None:
         return False
 
+    if not await repo.claim_prompt(sticker.id):
+        return False
+
     suggested = sticker.suggested or await repo.emoji_for(user_id)
     waiting = await repo.count_stickers(user_id)
     text = prompt_text(waiting)
     keyboard = prompt_keyboard(suggested)
     try:
-        sent = await message.answer(text, reply_markup=keyboard,
-                                    reply_to_message_id=sticker.source_msg)
-    except TelegramBadRequest:
-        sent = await message.answer(text, reply_markup=keyboard)
+        try:
+            sent = await message.answer(text, reply_markup=keyboard,
+                                        reply_to_message_id=sticker.source_msg)
+        except TelegramBadRequest:
+            sent = await message.answer(text, reply_markup=keyboard)
+    except Exception:
+        await repo.release_prompt(sticker.id)
+        raise
     await repo.set_prompt(sticker.id, sent.message_id)
     return True
 

@@ -15,6 +15,8 @@ _MIGRATIONS = (
     ("users", "building", "INTEGER NOT NULL DEFAULT 0"),
     ("users", "editing", "TEXT"),
     ("users", "importing", "TEXT"),
+    ("users", "deleting", "TEXT"),
+    ("users", "editing_pack", "TEXT"),
     ("queued_stickers", "emoji", "TEXT"),
     ("queued_stickers", "sha", "TEXT"),
     ("queued_stickers", "dup", "INTEGER NOT NULL DEFAULT 0"),

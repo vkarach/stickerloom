@@ -118,6 +118,8 @@ async def cmd_newpack(message: Message, command: CommandObject, bot: Bot,
     await repo.set_pending(user_id, None)
     await repo.set_editing(user_id, None)
     await repo.set_importing(user_id, None)
+    await repo.set_deleting(user_id, None)
+    await repo.set_editing_pack(user_id, None)
     await drop_preview(message, user_id)
     await repo.clear_stickers(user_id)
 
@@ -145,6 +147,8 @@ async def cmd_done(message: Message, bot: Bot, repo: PackRepo,
     user_id = message.from_user.id
     await repo.set_editing(user_id, None)
     await repo.set_importing(user_id, None)
+    await repo.set_deleting(user_id, None)
+    await repo.set_editing_pack(user_id, None)
     await drop_preview(message, user_id)
     name = await repo.active_for(user_id)
 
@@ -239,6 +243,11 @@ async def plain_text(message: Message, bot: Bot, repo: PackRepo, packs: PackMana
             await _build_pack(message, user_id, text, repo, packs)
         return
 
+    doomed = await repo.deleting_for(user_id)
+    if doomed:
+        await _settle_deletion(message, user_id, doomed, text, repo, packs)
+        return
+
     editing = await repo.editing_for(user_id)
     if editing:
         if not is_emoji(text):
@@ -264,6 +273,31 @@ async def plain_text(message: Message, bot: Bot, repo: PackRepo, packs: PackMana
         return
 
     await accept_emoji(message, user_id, "".join(split_emoji(text)), repo, packs)
+
+
+async def _settle_deletion(message: Message, user_id: int, name: str, typed: str,
+                           repo: PackRepo, packs: PackManager) -> None:
+    pack = await repo.find(user_id, name)
+    if pack is None:
+        await repo.set_deleting(user_id, None)
+        await message.answer("That pack is gone.")
+        return
+
+    if typed.strip().casefold() != pack.title.strip().casefold():
+        await message.answer("That is not its name. /mypacks to go back.")
+        return
+
+    try:
+        await packs.remove(user_id, name)
+    except Exception as exc:
+        log.warning("could not delete %s: %s", name, exc)
+        await message.answer("Could not delete it.")
+        return
+
+    if name == await repo.active_for(user_id):
+        await repo.clear_active(user_id)
+    await repo.set_deleting(user_id, None)
+    await message.answer(f"Deleted {pack.title}.")
 
 
 @router.message(Command("mypacks"))
@@ -326,11 +360,11 @@ def _menu_view(pack, count: int, active: bool) -> tuple[Text, InlineKeyboardMark
 
 
 def _confirm_view(pack) -> tuple[Text, InlineKeyboardMarkup]:
-    buttons = [[
-        InlineKeyboardButton(text="Delete", callback_data=f"pack:kill:{tag_for(pack.name)}"),
-        InlineKeyboardButton(text="Keep", callback_data=f"pack:open:{tag_for(pack.name)}"),
-    ]]
-    return Text("Delete ", pack.title, "?"), InlineKeyboardMarkup(inline_keyboard=buttons)
+    buttons = [[InlineKeyboardButton(text="Keep it",
+                                     callback_data=f"pack:open:{tag_for(pack.name)}")]]
+    content = Text("Deleting ", Bold(pack.title),
+                   " cannot be undone. Send its name to confirm.")
+    return content, InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("pack:"))
@@ -360,23 +394,14 @@ async def pack_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager)
         await repo.set_building(user_id, False)
     elif action == "stop":
         await repo.clear_active(user_id)
-    elif action == "kill":
-        try:
-            await packs.remove(user_id, pack.name)
-        except Exception as exc:
-            log.warning("could not delete %s: %s", pack.name, exc)
-            await callback.answer("Could not delete it")
-            return
-        if pack.name == await repo.active_for(user_id):
-            await repo.clear_active(user_id)
-        await callback.answer("Deleted")
-        await _render(callback, *_list_view([row for row in mine if row[0].name != pack.name]))
-        return
-
     await callback.answer()
     if action == "drop":
+        await repo.set_deleting(user_id, pack.name)
         await _render(callback, *_confirm_view(pack))
         return
+
+    await repo.set_deleting(user_id, None)
+    await repo.set_editing_pack(user_id, None)
 
     active = pack.name == await repo.active_for(user_id)
     await _render(callback, *_menu_view(pack, count, active))
@@ -391,13 +416,14 @@ def _sticker_list_view(pack, entries: list) -> tuple[Text, InlineKeyboardMarkup]
     shown = entries[:MAX_PICKERS]
     rows = [
         [InlineKeyboardButton(text=f"{n + 1} {emoji}", callback_data=f"edit:pick:{tag}:{n}")
-         for n, (_, emoji) in group]
+         for n, (_, emoji, _unique) in group]
         for group in _chunks(list(enumerate(shown)), PICKERS_PER_ROW)
     ]
     rows.append([InlineKeyboardButton(text="Back", callback_data=f"pack:open:{tag}")])
     tail = f" First {MAX_PICKERS} shown." if len(entries) > MAX_PICKERS else ""
-    return (Text("Pick a sticker in ",
-                 TextLink(pack.title, url=PackManager.link(pack.name)), ".", tail),
+    return (Text("Send a sticker from ",
+                 TextLink(pack.title, url=PackManager.link(pack.name)),
+                 ", or pick it below.", tail),
             InlineKeyboardMarkup(inline_keyboard=rows))
 
 
@@ -434,6 +460,35 @@ def _chunks(items: list, size: int) -> list:
     return [items[start:start + size] for start in range(0, len(items), size)]
 
 
+async def editing_a_pack(message: Message, repo: PackRepo) -> bool:
+    """False lets the sticker fall through to the converter, as any other file would."""
+    assert message.from_user
+    name = await repo.editing_pack_for(message.from_user.id)
+    return bool(name and message.sticker and message.sticker.set_name == name)
+
+
+@router.message(F.sticker, editing_a_pack)
+async def pick_by_sticker(message: Message, repo: PackRepo, packs: PackManager) -> None:
+    assert message.from_user and message.sticker
+    user_id = message.from_user.id
+    name = await repo.editing_pack_for(user_id)
+    pack = await repo.find(user_id, name)
+    if pack is None:
+        await repo.set_editing_pack(user_id, None)
+        await message.answer("That pack is gone.")
+        return
+
+    entries = await packs.stickers(name)
+    spot = next((n for n, (_, _emoji, unique) in enumerate(entries)
+                 if unique == message.sticker.file_unique_id), None)
+    if spot is None:
+        await message.answer("That sticker is not in this pack.")
+        return
+
+    content, keyboard = _sticker_view(entries[spot][1], tag_for(name), spot)
+    await message.answer(**content.as_kwargs(), reply_markup=keyboard)
+
+
 @router.callback_query(lambda c: c.data and c.data.startswith("edit:"))
 async def edit_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager) -> None:
     assert callback.data and callback.from_user
@@ -459,11 +514,12 @@ async def edit_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager)
         return
 
     if action == "list":
+        await repo.set_editing_pack(user_id, pack.name)
         await callback.answer()
         await _render(callback, *_sticker_list_view(pack, entries))
         return
 
-    file_id, emoji = entries[spot]
+    file_id, emoji, _unique = entries[spot]
 
     if action in ("pick", "emoji"):
         if action == "emoji":
