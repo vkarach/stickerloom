@@ -85,6 +85,12 @@ async def accept_emoji(message: Message, user_id: int, emoji: str,
         await message.answer(t("sticker.none_waiting"))
         return
 
+    # the file is still converting: hold the emoji, it goes in the moment the file lands
+    if sticker.file_id is None:
+        await repo.name_sticker(sticker.id, emoji)
+        await message.answer(t("sticker.remembered", emoji=emoji))
+        return
+
     name = await repo.active_for(user_id)
     if await is_duplicate(user_id, sticker, name, repo):
         await repo.mark_duplicate(sticker.id, emoji)
@@ -113,6 +119,43 @@ async def accept_emoji(message: Message, user_id: int, emoji: str,
         return
     if await repo.count_stickers(user_id) == 0:
         await message.answer(t("sticker.send_another"))
+
+
+# a sticker answered before it was ready is settled here, once the file exists
+async def settle(message: Message, user_id: int, sticker_id: int,
+                 repo: PackRepo, packs: PackManager, t: Translator) -> None:
+    sticker = await repo.sticker(sticker_id)
+    if sticker is None or sticker.emoji is None or sticker.file_id is None:
+        return
+
+    name = await repo.active_for(user_id)
+    if await is_duplicate(user_id, sticker, name, repo):
+        await repo.mark_duplicate(sticker.id, sticker.emoji)
+        await message.answer(t("dup.warn"), reply_markup=duplicate_keyboard(t))
+        return
+    if not name:
+        return
+
+    try:
+        await packs.add(user_id, name, sticker.file_id, sticker.emoji, _format_of(sticker))
+    except PackError as exc:
+        await message.answer(t(exc.key, **exc.params))
+        return
+    except Exception:
+        log.exception("could not add a held sticker for user %s", user_id)
+        await message.answer(t("sticker.add_failed"))
+        return
+
+    await repo.pop_sticker(sticker.id)
+    await repo.remember_sha(name, sticker.sha)
+    await _say(message, sticker, t("sticker.added", emoji=sticker.emoji))
+
+
+async def _say(message: Message, sticker, text: str) -> None:
+    try:
+        await message.answer(text, reply_to_message_id=sticker.source_msg)
+    except TelegramBadRequest:
+        await message.answer(text)
 
 
 async def resolve_duplicate(message: Message, user_id: int, keep: bool,

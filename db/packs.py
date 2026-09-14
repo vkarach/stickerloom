@@ -50,6 +50,9 @@ class PackRepo:
     _SET_LANG = "UPDATE users SET lang = ? WHERE user_id = ?"
     _GET_LANG = "SELECT lang FROM users WHERE user_id = ?"
 
+    _SET_NEXT_EMOJI = "UPDATE users SET next_emoji = ? WHERE user_id = ?"
+    _GET_NEXT_EMOJI = "SELECT next_emoji FROM users WHERE user_id = ?"
+
     _SET_EMOJI = "UPDATE users SET emoji = ? WHERE user_id = ?"
     _GET_EMOJI = "SELECT emoji FROM users WHERE user_id = ?"
 
@@ -76,10 +79,14 @@ class PackRepo:
         "FROM queued_stickers "
         "WHERE user_id = ? AND emoji IS NULL ORDER BY id LIMIT 1"
     )
+    _STICKER_AT = (
+        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha, fmt "
+        "FROM queued_stickers WHERE id = ?"
+    )
     _READY_STICKERS = (
         "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha, fmt "
         "FROM queued_stickers "
-        "WHERE user_id = ? AND emoji IS NOT NULL AND dup = 0 ORDER BY id"
+        "WHERE user_id = ? AND emoji IS NOT NULL AND dup = 0 AND file_id IS NOT NULL ORDER BY id"
     )
     _NAME_STICKER = "UPDATE queued_stickers SET emoji = ? WHERE id = ?"
     _MARK_DUP = "UPDATE queued_stickers SET emoji = ?, dup = 1 WHERE id = ?"
@@ -291,6 +298,11 @@ class PackRepo:
             return None
         return _sticker(row)
 
+    async def sticker(self, sticker_id: int) -> QueuedSticker | None:
+        async with self._conn.execute(self._STICKER_AT, (sticker_id,)) as cursor:
+            row = await cursor.fetchone()
+        return _sticker(row) if row else None
+
     async def ready_stickers(self, user_id: int) -> list[QueuedSticker]:
         """Stickers already given an emoji, in the order they were sent."""
         async with self._conn.execute(self._READY_STICKERS, (user_id,)) as cursor:
@@ -338,6 +350,21 @@ class PackRepo:
         async with self._conn.execute(self._GET_EMOJI, (user_id,)) as cursor:
             row = await cursor.fetchone()
         return row["emoji"] if row else None
+
+    async def set_next_emoji(self, user_id: int, emoji: str | None) -> None:
+        await self._ensure(user_id)
+        await self._conn.execute(self._SET_NEXT_EMOJI, (emoji, user_id))
+        await self._conn.commit()
+
+    # typed with no sticker waiting for it, so it belongs to the file still on its way
+    async def take_next_emoji(self, user_id: int) -> str | None:
+        async with self._conn.execute(self._GET_NEXT_EMOJI, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        waiting = row["next_emoji"] if row else None
+        if waiting:
+            await self._conn.execute(self._SET_NEXT_EMOJI, (None, user_id))
+            await self._conn.commit()
+        return waiting
 
     async def emoji_for(self, user_id: int) -> str:
         async with self._conn.execute(self._GET_EMOJI, (user_id,)) as cursor:

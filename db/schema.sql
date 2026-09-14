@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS users (
     importing      TEXT,
     deleting       TEXT,
     editing_pack   TEXT,
-    lang           TEXT
+    lang           TEXT,
+    next_emoji     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS packs (

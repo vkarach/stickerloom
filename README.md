@@ -136,10 +136,17 @@ real ffmpeg that assert the output really matches the format table above.
 
 `/newpack` asks for a name, then takes files until `/done`, which asks for the
 link prefix and creates the whole set in one call. Every file is converted,
-parked, and shown as a reply to the message it came from, so a batch is answered
-in the order it was sent. `/mypacks` lists your packs; picking one opens a menu
-that adds stickers, edits a sticker emoji, removes a sticker, saves a backup
-or deletes the pack. `/emoji` sets the emoji used for files that carry none of their own.
+parked, and shown as a reply to the message it came from, so a batch is
+answered in the order it was sent. An emoji sent while a file of yours is still
+converting is never dropped for arriving early: with a pack open it is held for
+that file and used the moment it lands, and with none open it waits for the
+file that comes back and answers for it when that file is put into a pack. With
+nothing converting there is nothing for it to belong to, so it is left alone.
+One written next to the file itself counts as the answer rather than a
+suggestion, so nothing is typed twice. `/mypacks` lists your packs; picking one
+opens a menu that adds stickers, edits a sticker emoji, removes a sticker,
+saves a backup or deletes the pack. `/emoji` sets the emoji used for files that
+carry none of their own.
 
 A pack built here is named `<prefix>_by_<bot username>`, because Telegram
 requires that suffix. The running bot owns it, which has two consequences worth

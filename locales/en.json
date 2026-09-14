@@ -61,6 +61,7 @@
     "Sticker accepted. Send an emoji. {n} more.",
     "Sticker accepted. Send an emoji. {n} more."
   ],
+  "sticker.remembered": "{emoji} saved, it goes in as soon as the file is ready.",
   "sticker.button": "Click to {emoji}",
   "sticker.added": "{emoji} added.",
   "sticker.send_another": "Send another or /done.",

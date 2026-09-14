@@ -8,10 +8,11 @@ from aiogram import Bot, F, Router
 from aiogram.types import FSInputFile, Message
 
 from bot.handlers.offer import offer_keyboard
-from bot.handlers.session import ask_for_emoji
+from bot.handlers.session import ask_for_emoji, settle
 from db.packs import PackRepo
 from i18n import Translator
 from packs import PackManager
+from packs.emoji import split_emoji
 
 from convert.download import download, resolve
 from convert.errors import StickerloomError, UnsupportedInput
@@ -119,6 +120,7 @@ async def _queue_for_pack(message: Message, user_id: int, spot: int, name: str,
         await message.answer(t("convert.rejected"))
     else:
         await repo.attach(spot, file_id, sha_of(result.path))
+        await settle(message, user_id, spot, repo, packs, t)
     await ask_for_emoji(message, user_id, repo, t)
 
 
@@ -146,7 +148,9 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
     async def pull(target: Path) -> None:
         await bot.download(source.file_id, destination=target)
 
-    await _start(message, source.name, source.emoji, pull, queue, repo, packs, t)
+    # an emoji typed on the file itself is an answer, not a suggestion
+    answered = "".join(split_emoji(message.caption or ""))
+    await _start(message, source.name, source.emoji, pull, queue, repo, packs, t, answered)
 
 
 # a link is intake too: the page is read here, the file itself is pulled by the worker
@@ -169,18 +173,25 @@ async def handle_link(message: Message, url: str, queue: JobQueue, repo: PackRep
     async def pull(destination: Path) -> None:
         await download(target.url, destination)
 
-    await _start(message, target.name, None, pull, queue, repo, packs, t)
+    answered = "".join(split_emoji(message.text or ""))
+    await _start(message, target.name, None, pull, queue, repo, packs, t, answered)
 
 
 async def _start(message: Message, name: str, emoji: str | None, pull: Pull, queue: JobQueue,
-                 repo: PackRepo, packs: PackManager, t: Translator) -> None:
+                 repo: PackRepo, packs: PackManager, t: Translator,
+                 answered: str = "") -> None:
     assert message.from_user
     user_id = message.from_user.id
+    # an emoji typed before the file arrived has been waiting for it
+    answered = answered or await repo.take_next_emoji(user_id) or ""
+    emoji = answered or emoji
 
     # the slot is taken now, so a batch is asked about in the order it was sent
     spot = None
     if await _in_pack_mode(user_id, repo):
         spot = await repo.push_sticker(user_id, None, name, emoji, message.message_id)
+        if answered:
+            await repo.name_sticker(spot, answered)
     status = await message.answer(t("convert.queued", name=name))
 
     async def fetch(work_dir: Path) -> Path:

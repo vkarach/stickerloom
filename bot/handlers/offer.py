@@ -6,9 +6,10 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from bot.handlers.session import ask_for_emoji
+from bot.handlers.session import ask_for_emoji, settle
 from db.packs import PackRepo
 from i18n import Translator
+from packs import PackManager
 from packs.emoji import is_emoji
 from packs.names import tag_for
 
@@ -62,7 +63,8 @@ async def _show(callback: CallbackQuery, keyboard: InlineKeyboardMarkup | None) 
 
 
 @router.callback_query(F.data.startswith(PICK) | (F.data == NEW))
-async def take_it(callback: CallbackQuery, repo: PackRepo, t: Translator) -> None:
+async def take_it(callback: CallbackQuery, repo: PackRepo, packs: PackManager,
+                  t: Translator) -> None:
     assert callback.data and callback.from_user
     user_id = callback.from_user.id
     if not isinstance(callback.message, Message) or not callback.message.document:
@@ -88,8 +90,14 @@ async def take_it(callback: CallbackQuery, repo: PackRepo, t: Translator) -> Non
 
     # the document this bot just sent is already a valid sticker file on Telegram
     document = callback.message.document
-    await repo.push_sticker(user_id, document.file_id, document.file_name or "sticker",
-                            _emoji_of(callback.message), callback.message.message_id)
+    typed = await repo.take_next_emoji(user_id)
+    spot = await repo.push_sticker(user_id, document.file_id, document.file_name or "sticker",
+                                   typed or _emoji_of(callback.message),
+                                   callback.message.message_id)
+    # the emoji was typed for this very file, so it needs no second asking
+    if typed:
+        await repo.name_sticker(spot, typed)
+        await settle(callback.message, user_id, spot, repo, packs, t)
 
     if callback.data == NEW:
         await callback.message.answer(t("pack.ask_name"))
