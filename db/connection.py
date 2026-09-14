@@ -23,6 +23,7 @@ _MIGRATIONS = (
     ("queued_stickers", "dup", "INTEGER NOT NULL DEFAULT 0"),
     ("queued_stickers", "source_msg", "INTEGER"),
     ("queued_stickers", "prompt_msg", "INTEGER"),
+    ("queued_stickers", "fmt", "TEXT"),
 )
 
 

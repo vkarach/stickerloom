@@ -87,6 +87,7 @@
   "menu.stop": "Stop adding",
   "menu.edit": "Edit stickers",
   "menu.delete": "Delete pack",
+  "menu.backup": "Backup",
   "menu.back": "Back",
   "delete.confirm": "Deleting {label} cannot be undone. Send its name to confirm.",
   "delete.keep": "Keep it",
@@ -161,5 +162,27 @@
   "error.link_unreachable": "Could not open that link.",
   "error.link_no_media": "No picture or video on that page.",
   "error.link_private": "That link points nowhere public.",
-  "error.link_pack": "That is a pack link. /import copies a pack."
+  "error.link_pack": "That is a pack link. /import copies a pack.",
+  "backup.packing": "Packing {title}...",
+  "backup.progress": "Packing {title}... {done} of {n}",
+  "backup.done": [
+    "{title} - {n} sticker. Unzip it and send the files back to rebuild the pack.",
+    "{title} - {n} stickers. Unzip it and send the files back to rebuild the pack."
+  ],
+  "backup.empty": "Nothing to back up yet.",
+  "backup.failed": "Could not pack that one up.",
+  "backup.reading": "Reading the backup...",
+  "backup.unpacking": "Restoring... {done} of {n}",
+  "backup.restored": [
+    "{n} sticker is back. Now the link.",
+    "{n} stickers are back. Now the link."
+  ],
+  "backup.restored_into": [
+    "{n} sticker went back into the pack. {link}",
+    "{n} stickers went back into the pack. {link}"
+  ],
+  "backup.restore_failed": "Nothing from that backup could be restored.",
+  "error.backup_broken": "That zip is not a pack backup.",
+  "error.backup_empty": "That backup holds no stickers.",
+  "error.backup_mixed": "That backup mixes sticker kinds, a pack holds only one."
 }

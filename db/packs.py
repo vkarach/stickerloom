@@ -54,8 +54,9 @@ class PackRepo:
     _GET_EMOJI = "SELECT emoji FROM users WHERE user_id = ?"
 
     _PUSH_STICKER = (
-        "INSERT INTO queued_stickers (user_id, file_id, name, suggested, source_msg, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO queued_stickers "
+        "(user_id, file_id, name, suggested, source_msg, created_at, fmt) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)"
     )
     _SET_PROMPT = "UPDATE queued_stickers SET prompt_msg = ? WHERE id = ?"
     _CLAIM_PROMPT = (
@@ -71,12 +72,12 @@ class PackRepo:
     )
     _FORGET_SHAS = "DELETE FROM pack_stickers WHERE name = ?"
     _HEAD_STICKER = (
-        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha "
+        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha, fmt "
         "FROM queued_stickers "
         "WHERE user_id = ? AND emoji IS NULL ORDER BY id LIMIT 1"
     )
     _READY_STICKERS = (
-        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha "
+        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha, fmt "
         "FROM queued_stickers "
         "WHERE user_id = ? AND emoji IS NOT NULL AND dup = 0 ORDER BY id"
     )
@@ -84,7 +85,7 @@ class PackRepo:
     _MARK_DUP = "UPDATE queued_stickers SET emoji = ?, dup = 1 WHERE id = ?"
     _CLEAR_DUP = "UPDATE queued_stickers SET dup = 0 WHERE id = ?"
     _FIRST_DUP = (
-        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha "
+        "SELECT id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, sha, fmt "
         "FROM queued_stickers WHERE user_id = ? AND dup = 1 ORDER BY id LIMIT 1"
     )
     _POP_STICKER = "DELETE FROM queued_stickers WHERE id = ?"
@@ -242,12 +243,13 @@ class PackRepo:
         await self._conn.commit()
 
     async def push_sticker(self, user_id: int, file_id: str | None, name: str,
-                           suggested: str | None, source_msg: int | None = None) -> int:
+                           suggested: str | None, source_msg: int | None = None,
+                           fmt: str | None = None) -> int:
         """Reserve the sticker's place in the queue; file_id lands once it is converted."""
         created = datetime.now(timezone.utc).isoformat()
         await self._ensure(user_id)
         cursor = await self._conn.execute(
-            self._PUSH_STICKER, (user_id, file_id, name, suggested, source_msg, created))
+            self._PUSH_STICKER, (user_id, file_id, name, suggested, source_msg, created, fmt))
         await self._conn.commit()
         return cursor.lastrowid
 
@@ -376,4 +378,4 @@ def _pack(row) -> Pack:
 def _sticker(row) -> QueuedSticker:
     return QueuedSticker(row["id"], row["user_id"], row["file_id"], row["name"],
                          row["suggested"], row["emoji"],
-                         row["source_msg"], row["prompt_msg"], row["sha"])
+                         row["source_msg"], row["prompt_msg"], row["sha"], row["fmt"])

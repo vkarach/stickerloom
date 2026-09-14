@@ -1,21 +1,28 @@
 import asyncio
 import logging
 import re
+import shutil
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (CallbackQuery, FSInputFile, InlineKeyboardButton,
+                           InlineKeyboardMarkup, Message)
 from aiogram.utils.formatting import Bold, Text, TextLink, as_list
 
-from bot.handlers.convert import handle_link
+from bot.handlers.convert import handle_link, sha_of
 from bot.handlers.session import (ADD_ANYWAY, SKIP_DUPLICATE, USE_SUGGESTED,
                                   accept_emoji, ask_for_emoji, resolve_duplicate)
 from convert.download import first_url
 from convert.queue import JobQueue
+from convert.spec import MAX_SOURCE_BYTES
 from db.packs import PackRepo
 from i18n import Translator
 from packs import PackError, PackManager
+from packs.manager import STICKER_FORMAT
+from packs.archive import BadBackup
+from packs.archive import read as read_backup
+from packs.archive import work_dir as backup_dir
 from packs.emoji import is_emoji, split_emoji
 from packs.names import build_name, check_base, tag_for
 
@@ -26,6 +33,8 @@ router = Router()
 KEEP_TITLE = "title:keep"
 MAX_PICKERS = 50
 PICKERS_PER_ROW = 5
+# a long pack takes a while to pull down, so the status only moves every so many stickers
+PROGRESS_EVERY = 10
 
 # the sticker shown while its menu is open, so it can be taken away again
 _PREVIEWS: dict[int, int] = {}
@@ -92,9 +101,10 @@ async def _build_pack(message: Message, user_id: int, base: str,
         return
     title = await repo.peek_pending(user_id) or base
     entries = [(sticker.file_id, sticker.emoji) for sticker in stickers]
+    fmt = stickers[0].fmt or STICKER_FORMAT
 
     try:
-        pack, added = await packs.create(user_id, base, title, entries)
+        pack, added = await packs.create(user_id, base, title, entries, fmt)
     except PackError as exc:
         await repo.set_asking(user_id, "prefix")
         await message.answer(t(exc.key, **exc.params))
@@ -226,6 +236,91 @@ async def settle_duplicate(callback: CallbackQuery, repo: PackRepo, packs: PackM
     if isinstance(callback.message, Message):
         await resolve_duplicate(callback.message, callback.from_user.id,
                                 callback.data == ADD_ANYWAY, repo, packs, t)
+
+
+ZIP_MIMES = ("application/zip", "application/x-zip-compressed")
+
+
+def is_backup(message: Message) -> bool:
+    doc = message.document
+    if doc is None:
+        return False
+    return ((doc.file_name or "").lower().endswith(".zip")
+            or (doc.mime_type or "") in ZIP_MIMES)
+
+
+# a backup zip goes back in the way it came out: every sticker with its own emoji
+@router.message(is_backup)
+async def take_backup(message: Message, bot: Bot, repo: PackRepo, packs: PackManager,
+                      t: Translator) -> None:
+    assert message.from_user and message.document
+    user_id = message.from_user.id
+    if (message.document.file_size or 0) > MAX_SOURCE_BYTES:
+        await message.answer(t("error.too_big", mb=MAX_SOURCE_BYTES // (1024 * 1024)))
+        return
+
+    status = await message.answer(t("backup.reading"))
+    work = backup_dir()
+    try:
+        bundle = work / "backup.zip"
+        await bot.download(message.document.file_id, destination=bundle)
+        restored = read_backup(bundle, work)
+    except BadBackup as exc:
+        await _retitle(status, t(exc.key, **exc.params))
+        shutil.rmtree(work, ignore_errors=True)
+        return
+    except Exception:
+        log.exception("could not read a backup from user %s", user_id)
+        await _retitle(status, t("error.backup_broken"))
+        shutil.rmtree(work, ignore_errors=True)
+        return
+
+    try:
+        await _restore(message, status, user_id, restored, repo, packs, t)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+async def _restore(message: Message, status: Message, user_id: int, restored,
+                   repo: PackRepo, packs: PackManager, t: Translator) -> None:
+    into = await repo.active_for(user_id)
+    fallback = await repo.emoji_for(user_id)
+    total = len(restored.entries)
+    taken = 0
+
+    for spot, (path, emoji) in enumerate(restored.entries, start=1):
+        emoji = emoji or fallback
+        try:
+            file_id = await packs.upload(user_id, path, restored.fmt)
+            if into:
+                await packs.add(user_id, into, file_id, emoji, restored.fmt)
+                await repo.remember_sha(into, sha_of(path))
+            else:
+                slot = await repo.push_sticker(user_id, file_id, path.name, None, None,
+                                               restored.fmt)
+                await repo.attach(slot, file_id, sha_of(path))
+                await repo.name_sticker(slot, emoji)
+        except Exception as exc:
+            log.warning("could not restore %s for user %s: %s", path.name, user_id, exc)
+            continue
+        taken += 1
+        if spot % PROGRESS_EVERY == 0 and spot < total:
+            await _retitle(status, t("backup.unpacking", done=spot, n=total))
+
+    await _drop(status)
+    if not taken:
+        await message.answer(t("backup.restore_failed"))
+        return
+    if into:
+        await message.answer(t("backup.restored_into", n=taken, link=PackManager.link(into)),
+                             link_preview_options={"is_disabled": True})
+        return
+
+    await repo.set_pending(user_id, restored.title or None)
+    await repo.set_building(user_id, True)
+    await message.answer(t("backup.restored", n=taken))
+    me = await message.bot.me()
+    await _ask_for_prefix(message, user_id, repo, me.username, t)
 
 
 @router.message(F.text, ~F.text.startswith("/"))
@@ -376,6 +471,7 @@ def _menu_view(pack, count: int, active: bool, t: Translator) -> tuple[Text,
     buttons = [
         [InlineKeyboardButton(text=fill[0], callback_data=fill[1])],
         [InlineKeyboardButton(text=t("menu.edit"), callback_data=f"edit:list:{tag}:0")],
+        [InlineKeyboardButton(text=t("menu.backup"), callback_data=f"pack:save:{tag}")],
         [InlineKeyboardButton(text=t("menu.delete"), callback_data=f"pack:drop:{tag}")],
         [InlineKeyboardButton(text=t("menu.back"), callback_data="pack:back:0")],
     ]
@@ -421,6 +517,10 @@ async def pack_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager,
     elif action == "stop":
         await repo.clear_active(user_id)
     await callback.answer()
+    if action == "save":
+        await _send_backup(callback, pack, count, packs, t)
+        return
+
     if action == "drop":
         await repo.set_deleting(user_id, pack.name)
         await _render(callback, *_confirm_view(pack, t))
@@ -431,6 +531,48 @@ async def pack_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager,
 
     active = pack.name == await repo.active_for(user_id)
     await _render(callback, *_menu_view(pack, count, active, t))
+
+
+async def _send_backup(callback: CallbackQuery, pack, count: int, packs: PackManager,
+                       t: Translator) -> None:
+    if not isinstance(callback.message, Message):
+        return
+    chat = callback.message
+    if not count:
+        await chat.answer(t("backup.empty"))
+        return
+
+    status = await chat.answer(t("backup.packing", title=pack.title))
+    work = backup_dir()
+
+    async def on_progress(done: int, total: int) -> None:
+        if done % PROGRESS_EVERY == 0 and done < total:
+            await _retitle(status, t("backup.progress", title=pack.title, done=done, n=total))
+
+    try:
+        bundle = await packs.backup(pack, work, on_progress)
+        await chat.answer_document(FSInputFile(bundle.path),
+                                   caption=t("backup.done", title=pack.title, n=bundle.count))
+    except Exception:
+        log.exception("could not back up %s", pack.name)
+        await chat.answer(t("backup.failed"))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        await _drop(status)
+
+
+async def _retitle(status: Message, text: str) -> None:
+    try:
+        await status.edit_text(text)
+    except TelegramBadRequest:
+        log.debug("could not edit the backup status", exc_info=True)
+
+
+async def _drop(status: Message) -> None:
+    try:
+        await status.delete()
+    except TelegramBadRequest:
+        log.debug("could not delete the backup status", exc_info=True)
 
 
 def _by_tag(mine: list, tag: str):

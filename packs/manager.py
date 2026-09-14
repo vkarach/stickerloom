@@ -6,6 +6,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile, InputSticker
 
 from models import Pack
+from packs.archive import build as build_archive
 from packs.emoji import MAX_EMOJI, split_emoji
 from packs.errors import NameTaken, PackFull, PackNotFound, PackNotOurs
 from packs.names import build_name
@@ -33,10 +34,10 @@ class PackManager:
     def link(name: str) -> str:
         return ADDSTICKERS_URL + name
 
-    async def upload(self, user_id: int, path: Path) -> str:
+    async def upload(self, user_id: int, path: Path, fmt: str = STICKER_FORMAT) -> str:
         """Put the file on Telegram's servers without posting it, and keep its file_id."""
         uploaded = await self._bot.upload_sticker_file(
-            user_id=user_id, sticker=FSInputFile(path), sticker_format=STICKER_FORMAT,
+            user_id=user_id, sticker=FSInputFile(path), sticker_format=fmt,
         )
         return uploaded.file_id
 
@@ -71,6 +72,10 @@ class PackManager:
         found = await self._bot.get_sticker_set(name=name)
         return [(s.file_id, s.emoji or "", s.file_unique_id) for s in found.stickers or []]
 
+    # every sticker of the set, plus a manifest naming their emoji, zipped up
+    async def backup(self, pack, dest_dir: Path, on_progress=None):
+        return await build_archive(self._bot, pack, dest_dir, on_progress)
+
     async def retag(self, file_id: str, emoji: str) -> None:
         try:
             await self._bot.set_sticker_emoji_list(sticker=file_id, emoji_list=_emoji_list(emoji))
@@ -83,12 +88,12 @@ class PackManager:
         except TelegramBadRequest as exc:
             raise _translate(exc) from exc
 
-    async def create(self, user_id: int, base: str, title: str,
-                     entries: list) -> tuple[Pack, int]:
+    async def create(self, user_id: int, base: str, title: str, entries: list,
+                     fmt: str = STICKER_FORMAT) -> tuple[Pack, int]:
         """Create the set with everything at once; Telegram only balks at more than 50."""
         me = await self._bot.me()
         name = build_name(base, me.username)
-        first = [_sticker(source, emoji) for source, emoji in entries[:MAX_INITIAL]]
+        first = [_sticker(source, emoji, fmt) for source, emoji in entries[:MAX_INITIAL]]
         try:
             await self._bot.create_new_sticker_set(
                 user_id=user_id, name=name, title=title, stickers=first,
@@ -99,7 +104,7 @@ class PackManager:
         added = len(first)
         for source, emoji in entries[MAX_INITIAL:]:
             try:
-                await self._push(user_id, name, _sticker(source, emoji), fresh=True)
+                await self._push(user_id, name, _sticker(source, emoji, fmt), fresh=True)
                 added += 1
             except Exception as exc:
                 log.warning("could not top up %s: %s", name, exc)
@@ -109,8 +114,9 @@ class PackManager:
         await self._repo.set_active(user_id, name)
         return pack, added
 
-    async def add(self, user_id: int, name: str, source, emoji: str) -> None:
-        await self._push(user_id, name, _sticker(source, emoji))
+    async def add(self, user_id: int, name: str, source, emoji: str,
+                  fmt: str = STICKER_FORMAT) -> None:
+        await self._push(user_id, name, _sticker(source, emoji, fmt))
         log.info("user %s added a sticker to %s", user_id, name)
 
     async def _push(self, user_id: int, name: str, sticker: InputSticker,

@@ -54,6 +54,21 @@ expanded into frames before encoding.
 Scaling is lanczos, except for a drawn source whose first frame holds 64 colors
 or fewer: pixel art is scaled with nearest neighbour, which keeps its edges.
 
+## Backup
+
+Backup writes the whole set into a zip: every sticker in order, plus a
+pack.json naming the set, its title, the day it was taken and the emoji of each
+file. Telegram is the only copy of a pack, and a deleted set is gone for good,
+so the zip is the copy that is yours.
+
+Sending that zip back restores it. The stickers keep their emoji and their
+order, and the kind of sticker is read from the files, so a backup of an
+animated or a static pack comes back as one - a set holds one kind, and a zip
+that mixes them is refused. With a pack open in /mypacks the stickers go into
+it; otherwise the bot asks for a link prefix and builds a new pack, exactly as
+/newpack does. Only the files the manifest lists are unpacked, and only from
+the zip's own top level.
+
 ## Language
 
 Every user-facing string lives in `locales/<lang>.json` and is looked up by key;
@@ -123,8 +138,8 @@ real ffmpeg that assert the output really matches the format table above.
 link prefix and creates the whole set in one call. Every file is converted,
 parked, and shown as a reply to the message it came from, so a batch is answered
 in the order it was sent. `/mypacks` lists your packs; picking one opens a menu
-that adds stickers, edits a sticker emoji, removes a sticker or deletes the
-pack. `/emoji` sets the emoji used for files that carry none of their own.
+that adds stickers, edits a sticker emoji, removes a sticker, saves a backup
+or deletes the pack. `/emoji` sets the emoji used for files that carry none of their own.
 
 A pack built here is named `<prefix>_by_<bot username>`, because Telegram
 requires that suffix. The running bot owns it, which has two consequences worth

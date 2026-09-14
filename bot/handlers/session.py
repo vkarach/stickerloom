@@ -8,6 +8,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from db.packs import PackRepo
 from i18n import Translator
 from packs import PackError, PackManager
+from packs.manager import STICKER_FORMAT
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +73,10 @@ async def ask_for_emoji(message: Message, user_id: int, repo: PackRepo,
     return True
 
 
+def _format_of(sticker) -> str:
+    return sticker.fmt or STICKER_FORMAT
+
+
 async def accept_emoji(message: Message, user_id: int, emoji: str,
                        repo: PackRepo, packs: PackManager, t: Translator) -> None:
     """Give the waiting sticker its emoji, then move on to the next one."""
@@ -90,7 +95,7 @@ async def accept_emoji(message: Message, user_id: int, emoji: str,
     if name:
         # an existing pack takes stickers straight away, a new one is only built on /done
         try:
-            await packs.add(user_id, name, sticker.file_id, emoji)
+            await packs.add(user_id, name, sticker.file_id, emoji, _format_of(sticker))
         except PackError as exc:
             await message.answer(t(exc.key, **exc.params))
             return
@@ -124,7 +129,8 @@ async def resolve_duplicate(message: Message, user_id: int, keep: bool,
         name = await repo.active_for(user_id)
         if name:
             try:
-                await packs.add(user_id, name, sticker.file_id, sticker.emoji)
+                await packs.add(user_id, name, sticker.file_id, sticker.emoji,
+                                _format_of(sticker))
             except Exception as exc:
                 log.warning("could not add a duplicate for user %s: %s", user_id, exc)
                 await message.answer(t("sticker.add_failed"))

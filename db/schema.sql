@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS queued_stickers (
     dup        INTEGER NOT NULL DEFAULT 0,
     source_msg INTEGER,
     prompt_msg INTEGER,
+    fmt        TEXT,
     created_at TEXT NOT NULL
 );
 

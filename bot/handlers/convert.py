@@ -118,12 +118,12 @@ async def _queue_for_pack(message: Message, user_id: int, spot: int, name: str,
         await repo.pop_sticker(spot)
         await message.answer(t("convert.rejected"))
     else:
-        await repo.attach(spot, file_id, _sha(result.path))
+        await repo.attach(spot, file_id, sha_of(result.path))
     await ask_for_emoji(message, user_id, repo, t)
 
 
-def _sha(path: Path) -> str:
-    """The only way to spot the same sticker twice: Telegram hands out no content hash."""
+# the only way to spot the same sticker twice: Telegram hands out no content hash
+def sha_of(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(65536), b""):
