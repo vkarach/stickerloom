@@ -474,10 +474,10 @@ def _menu_view(pack, count: int, active: bool, t: Translator) -> tuple[Text,
     fill = ((t("menu.stop"), f"pack:stop:{tag}") if active
             else (t("menu.add"), f"pack:add:{tag}"))
     buttons = [
-        [InlineKeyboardButton(text=fill[0], callback_data=fill[1])],
-        [InlineKeyboardButton(text=t("menu.edit"), callback_data=f"edit:list:{tag}:0")],
-        [InlineKeyboardButton(text=t("menu.backup"), callback_data=f"pack:save:{tag}")],
-        [InlineKeyboardButton(text=t("menu.delete"), callback_data=f"pack:drop:{tag}")],
+        [InlineKeyboardButton(text=fill[0], callback_data=fill[1]),
+         InlineKeyboardButton(text=t("menu.edit"), callback_data=f"edit:list:{tag}:0")],
+        [InlineKeyboardButton(text=t("menu.backup"), callback_data=f"pack:save:{tag}"),
+         InlineKeyboardButton(text=t("menu.delete"), callback_data=f"pack:drop:{tag}")],
         [InlineKeyboardButton(text=t("menu.back"), callback_data="pack:back:0")],
     ]
     head = t("menu.adding" if active else "menu.count", label="{label}", n=count)
@@ -604,8 +604,8 @@ def _sticker_list_view(pack, entries: list, t: Translator) -> tuple[Text,
 def _sticker_view(emoji: str, tag: str, spot: int, waiting: bool,
                   t: Translator) -> tuple[Text, InlineKeyboardMarkup]:
     buttons = [
-        [InlineKeyboardButton(text=t("editor.change"), callback_data=f"edit:emoji:{tag}:{spot}")],
-        [InlineKeyboardButton(text=t("editor.remove"), callback_data=f"edit:drop:{tag}:{spot}")],
+        [InlineKeyboardButton(text=t("editor.change"), callback_data=f"edit:emoji:{tag}:{spot}"),
+         InlineKeyboardButton(text=t("editor.remove"), callback_data=f"edit:drop:{tag}:{spot}")],
         [InlineKeyboardButton(text=t("menu.back"), callback_data=f"edit:list:{tag}:0")],
     ]
     key = "editor.sticker_waiting" if waiting else "editor.sticker"
