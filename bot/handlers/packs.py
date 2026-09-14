@@ -8,8 +8,11 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.formatting import Bold, Text, TextLink, as_list
 
+from bot.handlers.convert import handle_link
 from bot.handlers.session import (ADD_ANYWAY, SKIP_DUPLICATE, USE_SUGGESTED,
                                   accept_emoji, ask_for_emoji, resolve_duplicate)
+from convert.download import first_url
+from convert.queue import JobQueue
 from db.packs import PackRepo
 from i18n import Translator
 from packs import PackError, PackManager
@@ -226,8 +229,8 @@ async def settle_duplicate(callback: CallbackQuery, repo: PackRepo, packs: PackM
 
 
 @router.message(F.text, ~F.text.startswith("/"))
-async def plain_text(message: Message, bot: Bot, repo: PackRepo, packs: PackManager,
-                     t: Translator) -> None:
+async def plain_text(message: Message, bot: Bot, queue: JobQueue, repo: PackRepo,
+                     packs: PackManager, t: Translator) -> None:
     """Plain text answers whatever the bot last asked for: a pack name, a prefix, or an emoji."""
     assert message.from_user and message.text
     user_id = message.from_user.id
@@ -278,6 +281,10 @@ async def plain_text(message: Message, bot: Bot, repo: PackRepo, packs: PackMana
         await repo.set_editing(user_id, None)
         await drop_preview(message, user_id)
         await message.answer(t("emoji.changed", emoji=text))
+        return
+
+    if link := first_url(text):
+        await handle_link(message, link, queue, repo, packs, t)
         return
 
     if await repo.head_sticker(user_id) is None:

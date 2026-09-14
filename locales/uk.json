@@ -1,5 +1,5 @@
 {
-  "start": "Кинь картинку, стікер, GIF чи відео - дам готовий відеостікер, хоч зара в пак.\n\nАбо збери пак прямо тут:\n/newpack - назва, файли, /done і готово :)\n/mypacks - додати стікери, змінити емодзі, видалити пак\n/import - скопіювати пак із @Stickers чи іншого бота\n\n/help - решта.",
+  "start": "Кинь картинку, стікер, GIF, відео або посилання на них - дам готовий відеостікер, хоч зара в пак.\n\nАбо збери пак прямо тут:\n/newpack - назва, файли, /done і готово :)\n/mypacks - додати стікери, змінити емодзі, видалити пак\n/import - скопіювати пак із @Stickers чи іншого бота\n\n/help - решта.",
   "format.title": "Кожен файл повертається так",
   "format.codec": "WebM, кодек VP9, прозорість на місці",
   "format.side": "{side} px по довгій стороні, без чорних полів",
@@ -38,7 +38,7 @@
     "Лише {n} файлів за раз. Дочекайся."
   ],
   "pack.ask_name": "Надішли назву паку.",
-  "pack.collecting": "Кидай файли або стікери. /done - коли заїбе.",
+  "pack.collecting": "Кидай файли, стікери або посилання. /done - коли заїбе.",
   "pack.nothing_to_finish": "Нічого завершувати 🤦‍♂️",
   "pack.done": "Готово. {link}",
   "pack.done_missing": [
@@ -87,7 +87,7 @@
   "packs.row": "- {label} ({n})",
   "packs.gone": "Цього паку вже немає",
   "menu.count": "{label} ({n})",
-  "menu.adding": "{label} ({n})\nКидай сюди файли або стікери. /done - коли все.",
+  "menu.adding": "{label} ({n})\nКидай сюди файли, стікери або посилання. /done - коли все.",
   "menu.add": "Додати стікери",
   "menu.stop": "Припинити додавання",
   "menu.edit": "Редагувати стікери",
@@ -135,10 +135,11 @@
   "convert.converting": "{name}: конвертую",
   "convert.failed": "{name}: {reason}",
   "convert.crashed": "{name}: щось пішло не так",
+  "link.looking": "Відкриваю посилання...",
   "convert.rejected": "Telegram не прийняв цей файл.",
   "caption.still": "{width}x{height} - {kb} KB",
   "caption.clip": "{width}x{height} - {seconds}с - {kb} KB",
-  "error.send_media": "Кинь картинку, стікер, GIF або коротке відео.",
+  "error.send_media": "Кинь картинку, стікер, GIF, коротке відео або посилання на них.",
   "error.tgs": "Анімовані стікери й так лягають у пак, тут конвертувати нічого.",
   "error.unsupported": "Не читаю {suffix}. Вмію: {kinds}",
   "error.unsupported_unknown": "Не читаю це. Вмію: {kinds}",
@@ -163,5 +164,9 @@
   "admin.stickers": "стікерів: {n}",
   "admin.queued": "чекає в черзі: {n}",
   "admin.nobody": "ще нікого",
-  "admin.refresh": "Оновить"
+  "admin.refresh": "Оновить",
+  "error.link_unreachable": "Не відкривається таке посилання.",
+  "error.link_no_media": "На тій сторінці нема ні картинки, ні відео.",
+  "error.link_private": "Це посилання веде кудись не туди.",
+  "error.link_pack": "Це посилання на пак. Копіює пак /import."
 }

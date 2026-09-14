@@ -19,6 +19,18 @@ SUPPORTED_EXTENSIONS = frozenset({
     ".mp4", ".webm", ".mov", ".m4v",
 })
 
+# a file from the GIF panel or a web link arrives with a mime type instead of a name
+EXTENSION_BY_MIME = {
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/apng": ".apng",
+    "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+}
+
 # animated Telegram stickers already belong in a pack, converting them buys nothing
 REJECTED_EXTENSIONS = frozenset({".tgs"})
 

@@ -25,7 +25,19 @@ frame rate until they fit the size limit.
 ## Accepted inputs
 
 PNG, JPEG, WebP (still and animated), GIF, APNG, MP4, WebM, MOV, M4V, plus
-Telegram photos, stickers, animations, videos and video notes.
+Telegram photos, stickers, animations, videos and video notes, or a link to
+any of those.
+
+A link to a file works the same as the file: paste one and the page behind it
+is read for its `og:video` or `og:image`, so a Tenor or Giphy page yields the
+GIF it shows. A page that ships no meta tags is searched for a file that
+carries the same id as the page itself, so a recommendation next to it is never
+picked up by mistake. An animated image is preferred over a video, because only
+the image can carry transparency. Links are fetched by the same worker pool
+that converts, the download is capped at the source limit, and a link that
+resolves to a private or loopback address is refused - a user's link may not
+reach inside the network the bot runs in. A `t.me` pack link is not media:
+`/import` copies packs.
 
 `.tgs` is rejected on purpose: animated Telegram stickers already work in a
 pack, so there is nothing to convert. Sources over 20 MB are rejected because

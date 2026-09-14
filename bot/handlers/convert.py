@@ -1,5 +1,6 @@
 import hashlib
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -12,9 +13,11 @@ from db.packs import PackRepo
 from i18n import Translator
 from packs import PackManager
 
+from convert.download import download, resolve
 from convert.errors import StickerloomError, UnsupportedInput
 from convert.queue import JobQueue
 from convert.spec import (
+    EXTENSION_BY_MIME,
     MAX_SOURCE_BYTES,
     STILL_DURATION,
     OUTPUT_SUFFIX,
@@ -29,16 +32,7 @@ router = Router()
 
 MEDIA = F.document | F.photo | F.sticker | F.animation | F.video | F.video_note
 
-# a file from the GIF panel arrives with a caption for a name, or with none
-BY_MIME = {
-    "image/gif": ".gif",
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "video/mp4": ".mp4",
-    "video/quicktime": ".mov",
-    "video/webm": ".webm",
-}
+Pull = Callable[[Path], Awaitable[None]]
 
 
 def _named(file_name: str | None, mime: str | None, fallback: str) -> str:
@@ -46,7 +40,7 @@ def _named(file_name: str | None, mime: str | None, fallback: str) -> str:
     suffix = Path(file_name or "").suffix.lower()
     if suffix in SUPPORTED_EXTENSIONS or suffix in REJECTED_EXTENSIONS:
         return file_name
-    known = BY_MIME.get(mime or "")
+    known = EXTENSION_BY_MIME.get(mime or "")
     if not known:
         return file_name or fallback
     return Path(file_name or fallback).stem + known
@@ -141,7 +135,6 @@ def _sha(path: Path) -> str:
 async def handle_media(message: Message, bot: Bot, queue: JobQueue,
                        repo: PackRepo, packs: PackManager, t: Translator) -> None:
     assert message.from_user
-    user_id = message.from_user.id
 
     try:
         source = _source(message)
@@ -150,16 +143,49 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
         await message.answer(t(exc.key, **exc.params))
         return
 
-    name = source.name
+    async def pull(target: Path) -> None:
+        await bot.download(source.file_id, destination=target)
+
+    await _start(message, source.name, source.emoji, pull, queue, repo, packs, t)
+
+
+# a link is intake too: the page is read here, the file itself is pulled by the worker
+async def handle_link(message: Message, url: str, queue: JobQueue, repo: PackRepo,
+                      packs: PackManager, t: Translator) -> None:
+    assert message.from_user
+    looking = await message.answer(t("link.looking"))
+    try:
+        target = await resolve(url)
+        _validate(target.name, 0)
+    except StickerloomError as exc:
+        await _edit(looking, t(exc.key, **exc.params))
+        return
+    except Exception:
+        log.exception("could not resolve %r", url)
+        await _edit(looking, t("error.link_unreachable"))
+        return
+    await _delete(looking)
+
+    async def pull(destination: Path) -> None:
+        await download(target.url, destination)
+
+    await _start(message, target.name, None, pull, queue, repo, packs, t)
+
+
+async def _start(message: Message, name: str, emoji: str | None, pull: Pull, queue: JobQueue,
+                 repo: PackRepo, packs: PackManager, t: Translator) -> None:
+    assert message.from_user
+    user_id = message.from_user.id
+
     # the slot is taken now, so a batch is asked about in the order it was sent
     spot = None
     if await _in_pack_mode(user_id, repo):
-        spot = await repo.push_sticker(user_id, None, name, source.emoji, message.message_id)
+        spot = await repo.push_sticker(user_id, None, name, emoji, message.message_id)
     status = await message.answer(t("convert.queued", name=name))
 
     async def fetch(work_dir: Path) -> Path:
         target = work_dir / name
-        await bot.download(source.file_id, destination=target)
+        await pull(target)
         return target
 
     async def on_status(_: str) -> None:
@@ -172,7 +198,7 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
             return
 
         document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
-        await message.answer_document(document, caption=_caption(result, source.emoji, t),
+        await message.answer_document(document, caption=_caption(result, emoji, t),
                                       reply_markup=offer_keyboard(t))
 
     async def on_error(exc: Exception) -> None:

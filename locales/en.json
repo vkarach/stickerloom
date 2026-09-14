@@ -1,5 +1,5 @@
 {
-  "start": "Send a picture, sticker, GIF or video - it comes back as a video sticker, ready to go into a pack.\n\nOr build the pack right here:\n/newpack - name it, send files, /done\n/mypacks - add stickers, change an emoji, delete a pack\n/import - copy a pack made in @Stickers or another bot\n\n/help for the rest.",
+  "start": "Send a picture, sticker, GIF, video or a link to one - it comes back as a video sticker, ready to go into a pack.\n\nOr build the pack right here:\n/newpack - name it, send files, /done\n/mypacks - add stickers, change an emoji, delete a pack\n/import - copy a pack made in @Stickers or another bot\n\n/help for the rest.",
   "format.title": "Every file comes back as",
   "format.codec": "WebM video, VP9 codec, transparency kept",
   "format.side": "{side} px on the long side, no black bars added",
@@ -36,7 +36,7 @@
   "lang.ask": "Choose a language.",
   "lang.set": "Language set.",
   "pack.ask_name": "Send a name for the pack.",
-  "pack.collecting": "Send files or stickers. /done to finish.",
+  "pack.collecting": "Send files, stickers or links. /done to finish.",
   "pack.nothing_to_finish": "Nothing to finish.",
   "pack.done": "Done. {link}",
   "pack.done_missing": [
@@ -82,7 +82,7 @@
   "packs.row": "- {label} ({n})",
   "packs.gone": "That pack is gone",
   "menu.count": "{label} ({n})",
-  "menu.adding": "{label} ({n})\nSend files or stickers here. /done when finished.",
+  "menu.adding": "{label} ({n})\nSend files, stickers or links here. /done when finished.",
   "menu.add": "Add stickers",
   "menu.stop": "Stop adding",
   "menu.edit": "Edit stickers",
@@ -128,10 +128,11 @@
   "convert.converting": "{name}: converting",
   "convert.failed": "{name}: {reason}",
   "convert.crashed": "{name}: something went wrong",
+  "link.looking": "Opening the link...",
   "convert.rejected": "Telegram rejected that file.",
   "caption.still": "{width}x{height} - {kb} KB",
   "caption.clip": "{width}x{height} - {seconds}s - {kb} KB",
-  "error.send_media": "Send a picture, sticker, GIF or short video.",
+  "error.send_media": "Send a picture, sticker, GIF, short video or a link to one.",
   "error.tgs": "Animated stickers already work in a pack, nothing to convert.",
   "error.unsupported": "Cannot read {suffix}. Supported: {kinds}",
   "error.unsupported_unknown": "Cannot read that. Supported: {kinds}",
@@ -156,5 +157,9 @@
   "admin.stickers": "stickers: {n}",
   "admin.queued": "parked in the queue: {n}",
   "admin.nobody": "nobody yet",
-  "admin.refresh": "Refresh"
+  "admin.refresh": "Refresh",
+  "error.link_unreachable": "Could not open that link.",
+  "error.link_no_media": "No picture or video on that page.",
+  "error.link_private": "That link points nowhere public.",
+  "error.link_pack": "That is a pack link. /import copies a pack."
 }
