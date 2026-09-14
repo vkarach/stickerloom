@@ -89,6 +89,11 @@
   "menu.edit": "Edit",
   "menu.delete": "❗️ Delete",
   "menu.backup": "Backup",
+  "backup.confirm": [
+    "A zip with the {n} sticker of {label} will be made.",
+    "A zip with all {n} stickers of {label} will be made."
+  ],
+  "backup.go": "Make it",
   "menu.back": "Back",
   "delete.confirm": "Deleting {label} cannot be undone. Send its name to confirm.",
   "delete.keep": "Keep it",

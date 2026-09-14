@@ -493,6 +493,17 @@ def _confirm_view(pack, t: Translator) -> tuple[Text, InlineKeyboardMarkup]:
             InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
+def _backup_view(pack, count: int, t: Translator) -> tuple[Text, InlineKeyboardMarkup]:
+    tag = tag_for(pack.name)
+    buttons = [[
+        InlineKeyboardButton(text=t("backup.go"), callback_data=f"pack:zip:{tag}"),
+        InlineKeyboardButton(text=t("menu.back"), callback_data=f"pack:open:{tag}"),
+    ]]
+    asked = t("backup.confirm", label="{label}", n=count)
+    return (linked(asked, pack.title, PackManager.link(pack.name)),
+            InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
 @router.callback_query(lambda c: c.data and c.data.startswith("pack:"))
 async def pack_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager,
                     t: Translator) -> None:
@@ -523,7 +534,13 @@ async def pack_menu(callback: CallbackQuery, repo: PackRepo, packs: PackManager,
         await repo.clear_active(user_id)
     await callback.answer()
     if action == "save":
+        await _render(callback, *_backup_view(pack, count, t))
+        return
+
+    if action == "zip":
         await _send_backup(callback, pack, count, packs, t)
+        open_now = pack.name == await repo.active_for(user_id)
+        await _render(callback, *_menu_view(pack, count, open_now, t))
         return
 
     if action == "drop":
