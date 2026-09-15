@@ -88,7 +88,7 @@ async def accept_emoji(message: Message, user_id: int, emoji: str,
     # the file is still converting: hold the emoji, it goes in the moment the file lands
     if sticker.file_id is None:
         await repo.name_sticker(sticker.id, emoji)
-        await message.answer(t("sticker.remembered", emoji=emoji))
+        await _say(message, sticker, t("sticker.remembered", emoji=emoji))
         return
 
     name = await repo.active_for(user_id)

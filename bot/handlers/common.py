@@ -97,7 +97,6 @@ async def cmd_cancel(message: Message, queue: JobQueue, repo: PackRepo, t: Trans
     await repo.set_importing(user_id, None)
     await repo.set_deleting(user_id, None)
     await repo.set_editing_pack(user_id, None)
-    await repo.set_next_emoji(user_id, None)
     await drop_preview(message, user_id)
 
     dropped = converting + waiting

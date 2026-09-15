@@ -90,13 +90,12 @@ async def take_it(callback: CallbackQuery, repo: PackRepo, packs: PackManager,
 
     # the document this bot just sent is already a valid sticker file on Telegram
     document = callback.message.document
-    typed = await repo.take_next_emoji(user_id)
+    shown = _emoji_of(callback.message)
     spot = await repo.push_sticker(user_id, document.file_id, document.file_name or "sticker",
-                                   typed or _emoji_of(callback.message),
-                                   callback.message.message_id)
-    # the emoji was typed for this very file, so it needs no second asking
-    if typed:
-        await repo.name_sticker(spot, typed)
+                                   shown, callback.message.message_id)
+    # the emoji is written on the file itself, so there is nothing left to ask
+    if shown:
+        await repo.name_sticker(spot, shown)
         await settle(callback.message, user_id, spot, repo, packs, t)
 
     if callback.data == NEW:

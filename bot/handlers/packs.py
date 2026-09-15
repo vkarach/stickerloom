@@ -381,11 +381,6 @@ async def plain_text(message: Message, bot: Bot, queue: JobQueue, repo: PackRepo
         return
 
     if await repo.head_sticker(user_id) is None:
-        # only an emoji walking behind a file still being converted has something to land on
-        if is_emoji(text) and queue.pending_for(user_id):
-            emoji = "".join(split_emoji(text))
-            await repo.set_next_emoji(user_id, emoji)
-            await message.answer(t("sticker.remembered", emoji=emoji))
         return
 
     if not is_emoji(text):

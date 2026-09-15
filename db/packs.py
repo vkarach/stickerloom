@@ -50,9 +50,6 @@ class PackRepo:
     _SET_LANG = "UPDATE users SET lang = ? WHERE user_id = ?"
     _GET_LANG = "SELECT lang FROM users WHERE user_id = ?"
 
-    _SET_NEXT_EMOJI = "UPDATE users SET next_emoji = ? WHERE user_id = ?"
-    _GET_NEXT_EMOJI = "SELECT next_emoji FROM users WHERE user_id = ?"
-
     _SET_EMOJI = "UPDATE users SET emoji = ? WHERE user_id = ?"
     _GET_EMOJI = "SELECT emoji FROM users WHERE user_id = ?"
 
@@ -350,21 +347,6 @@ class PackRepo:
         async with self._conn.execute(self._GET_EMOJI, (user_id,)) as cursor:
             row = await cursor.fetchone()
         return row["emoji"] if row else None
-
-    async def set_next_emoji(self, user_id: int, emoji: str | None) -> None:
-        await self._ensure(user_id)
-        await self._conn.execute(self._SET_NEXT_EMOJI, (emoji, user_id))
-        await self._conn.commit()
-
-    # typed with no sticker waiting for it, so it belongs to the file still on its way
-    async def take_next_emoji(self, user_id: int) -> str | None:
-        async with self._conn.execute(self._GET_NEXT_EMOJI, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-        waiting = row["next_emoji"] if row else None
-        if waiting:
-            await self._conn.execute(self._SET_NEXT_EMOJI, (None, user_id))
-            await self._conn.commit()
-        return waiting
 
     async def emoji_for(self, user_id: int) -> str:
         async with self._conn.execute(self._GET_EMOJI, (user_id,)) as cursor:

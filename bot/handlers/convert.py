@@ -182,16 +182,13 @@ async def _start(message: Message, name: str, emoji: str | None, pull: Pull, que
                  answered: str = "") -> None:
     assert message.from_user
     user_id = message.from_user.id
-    # an emoji typed before the file arrived has been waiting for it
-    answered = answered or await repo.take_next_emoji(user_id) or ""
     emoji = answered or emoji
 
-    # the slot is taken now, so a batch is asked about in the order it was sent
-    spot = None
-    if await _in_pack_mode(user_id, repo):
-        spot = await repo.push_sticker(user_id, None, name, emoji, message.message_id)
-        if answered:
-            await repo.name_sticker(spot, answered)
+    # every file holds a slot of its own, so an emoji typed next lands on the right one
+    spot = await repo.push_sticker(user_id, None, name, emoji, message.message_id)
+    if answered:
+        await repo.name_sticker(spot, answered)
+    into_pack = await _in_pack_mode(user_id, repo)
     status = await message.answer(t("convert.queued", name=name))
 
     async def fetch(work_dir: Path) -> Path:
@@ -204,17 +201,14 @@ async def _start(message: Message, name: str, emoji: str | None, pull: Pull, que
 
     async def on_done(result: ConvertResult) -> None:
         await _delete(status)
-        if spot is not None:
+        if into_pack:
             await _queue_for_pack(message, user_id, spot, name, result, repo, packs, t)
             return
-
-        document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
-        await message.answer_document(document, caption=_caption(result, emoji, t),
-                                      reply_markup=offer_keyboard(t))
+        await _hand_back(message, spot, name, emoji, result, repo, t)
 
     async def on_error(exc: Exception) -> None:
-        if spot is not None:
-            await repo.pop_sticker(spot)
+        await repo.pop_sticker(spot)
+        if into_pack:
             await ask_for_emoji(message, user_id, repo, t)
         if isinstance(exc, StickerloomError):
             await _edit(status, t("convert.failed", name=name, reason=t(exc.key, **exc.params)))
@@ -228,6 +222,17 @@ async def _start(message: Message, name: str, emoji: str | None, pull: Pull, que
     ))
     if position > 1:
         await _edit(status, t("convert.queued_position", name=name, n=position))
+
+
+# a plain conversion keeps its slot only until the file is handed back
+async def _hand_back(message: Message, spot: int, name: str, emoji: str | None,
+                     result: ConvertResult, repo: PackRepo, t: Translator) -> None:
+    waiting = await repo.sticker(spot)
+    chosen = (waiting.emoji if waiting else None) or emoji
+    await repo.pop_sticker(spot)
+    document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
+    await message.answer_document(document, caption=_caption(result, chosen, t),
+                                  reply_markup=offer_keyboard(t))
 
 
 async def _edit(status: Message, text: str) -> None:
