@@ -2,8 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from convert.encoder import LADDER, build_args, output_duration
-from convert.spec import FPS, MAX_DURATION, STILL_DURATION
+from convert.encoder import (BEST_CRF, FPS_LADDER, WORST_CRF, build_args,
+                             next_crf, output_duration)
+from convert.spec import FPS, MAX_BYTES, MAX_DURATION, STILL_DURATION
 from models import MediaInfo
 
 SRC = Path("in.webp")
@@ -68,19 +69,23 @@ def test_frame_sequence_input_replaces_the_source():
     assert args[args.index("-framerate") + 1] == "10.0"
 
 
-def test_ladder_starts_at_best_quality_and_is_finite():
-    assert len(LADDER) >= 3
-    assert LADDER[0] == (32, FPS)
+def test_the_first_try_spends_the_whole_size_budget():
+    assert 0 < BEST_CRF < WORST_CRF
 
 
-def test_ladder_only_ever_increases_pressure():
-    crfs = [crf for crf, _ in LADDER]
-    rates = [fps for _, fps in LADDER]
-    assert crfs == sorted(crfs)
-    assert rates == sorted(rates, reverse=True)
-    assert all(0 < crf <= 63 for crf in crfs)
-    assert all(0 < fps <= FPS for fps in rates)
+def test_a_miss_is_answered_by_a_step_towards_the_limit():
+    assert next_crf(20, MAX_BYTES * 2) == 29
+    assert next_crf(20, MAX_BYTES * 4) == 38
 
 
-def test_ladder_ends_low_enough_for_incompressible_content():
-    assert LADDER[-1] == (63, 8)
+def test_a_near_miss_still_moves():
+    assert next_crf(20, MAX_BYTES + 1) > 20
+
+
+def test_crf_never_passes_the_worst_the_encoder_has():
+    assert next_crf(62, 10 * 1024 * 1024) == WORST_CRF
+
+
+def test_the_frame_rate_ladder_only_ever_slows_down():
+    assert list(FPS_LADDER) == sorted(FPS_LADDER, reverse=True)
+    assert all(0 < fps < FPS for fps in FPS_LADDER)

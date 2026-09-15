@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 from pathlib import Path
 
 from convert.decode import expand_frames, few_colors
@@ -9,18 +10,21 @@ from models import ConvertResult, MediaInfo
 
 log = logging.getLogger(__name__)
 
+# measured: vp9 halves the file about every 9 points of crf, enough to aim the next try
+BEST_CRF = 20
+WORST_CRF = 63
+CRF_HALVING = 9.0
+CRF_STEP = 2
+
 # crf 63 maxes out the quantizer and one-pass libvpx ignores -b:v, so fps is the last lever
-LADDER: tuple[tuple[int, int], ...] = (
-    (32, 30),
-    (40, 30),
-    (48, 30),
-    (56, 30),
-    (63, 30),
-    (63, 20),
-    (63, 15),
-    (63, 10),
-    (63, 8),
-)
+FPS_LADDER: tuple[int, ...] = (20, 15, 10, 8)
+
+
+# aim at the limit instead of walking down a table one rung at a time
+def next_crf(crf: int, size: int) -> int:
+    over = max(size / MAX_BYTES, 1.0)
+    aimed = crf + round(CRF_HALVING * math.log2(over))
+    return min(WORST_CRF, max(crf + CRF_STEP, aimed))
 
 
 def output_duration(info: MediaInfo) -> float:
@@ -77,7 +81,11 @@ async def encode(src: Path, dst: Path, info: MediaInfo, work_dir: Path | None = 
 
     scaler = "neighbor" if few_colors(src) else "lanczos"
     smallest = None
-    for attempt, (crf, fps) in enumerate(LADDER, start=1):
+    attempt = 0
+    crf, fps = BEST_CRF, FPS
+
+    while True:
+        attempt += 1
         await _run(build_args(src, dst, info, crf, fps, sequence, scaler))
         size = dst.stat().st_size
         smallest = size if smallest is None else min(smallest, size)
@@ -89,6 +97,15 @@ async def encode(src: Path, dst: Path, info: MediaInfo, work_dir: Path | None = 
                 path=dst, width=width, height=height,
                 duration=output_duration(info), size=size, attempts=attempt,
             )
+
+        if crf < WORST_CRF:
+            crf = next_crf(crf, size)
+        elif fps == FPS_LADDER[-1]:
+            break
+        elif fps == FPS:
+            fps = FPS_LADDER[0]
+        else:
+            fps = FPS_LADDER[FPS_LADDER.index(fps) + 1]
 
     raise CannotFitSizeLimit("error.too_heavy", smallest or 0,
                              kb=MAX_BYTES // 1024, best=(smallest or 0) // 1024)
