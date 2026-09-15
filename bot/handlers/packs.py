@@ -31,8 +31,6 @@ log = logging.getLogger(__name__)
 router = Router()
 
 KEEP_TITLE = "title:keep"
-MAX_PICKERS = 50
-PICKERS_PER_ROW = 5
 # a long pack takes a while to pull down, so the status only moves every so many stickers
 PROGRESS_EVERY = 10
 
@@ -604,18 +602,10 @@ def _by_tag(mine: list, tag: str):
 def _sticker_list_view(pack, entries: list, t: Translator) -> tuple[Text,
                                                                     InlineKeyboardMarkup]:
     tag = tag_for(pack.name)
-    shown = entries[:MAX_PICKERS]
-    rows = [
-        [InlineKeyboardButton(text=f"{n + 1} {emoji}", callback_data=f"edit:pick:{tag}:{n}")
-         for n, (_, emoji, _unique) in group]
-        for group in _chunks(list(enumerate(shown)), PICKERS_PER_ROW)
-    ]
-    rows.append([InlineKeyboardButton(text=t("menu.back"), callback_data=f"pack:open:{tag}")])
-    capped = len(entries) > MAX_PICKERS
-    ask = t("editor.pick_capped" if capped else "editor.pick",
-            label="{label}", n=MAX_PICKERS)
+    back = [[InlineKeyboardButton(text=t("menu.back"), callback_data=f"pack:open:{tag}")]]
+    ask = t("editor.pick", label="{label}")
     return (linked(ask, pack.title, PackManager.link(pack.name)),
-            InlineKeyboardMarkup(inline_keyboard=rows))
+            InlineKeyboardMarkup(inline_keyboard=back))
 
 
 def _sticker_view(emoji: str, tag: str, spot: int, waiting: bool,
@@ -645,10 +635,6 @@ async def drop_preview(message: Message, user_id: int) -> None:
         await message.bot.delete_message(message.chat.id, shown)
     except TelegramBadRequest:
         log.debug("preview %s was already gone", shown)
-
-
-def _chunks(items: list, size: int) -> list:
-    return [items[start:start + size] for start in range(0, len(items), size)]
 
 
 async def editing_a_pack(message: Message, repo: PackRepo) -> bool:
