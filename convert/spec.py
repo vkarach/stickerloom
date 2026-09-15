@@ -14,6 +14,9 @@ DRAWN_EXTENSIONS = frozenset({".png", ".gif", ".apng", ".webp"})
 # getFile refuses anything larger, so a bigger source can never be downloaded
 MAX_SOURCE_BYTES = 20 * 1024 * 1024
 
+# a link is fetched from the web, where that limit does not apply
+MAX_FETCH_BYTES = 200 * 1024 * 1024
+
 SUPPORTED_EXTENSIONS = frozenset({
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".apng",
     ".mp4", ".webm", ".mov", ".m4v",

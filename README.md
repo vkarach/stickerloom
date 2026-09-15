@@ -40,8 +40,9 @@ reach inside the network the bot runs in. A `t.me` pack link is not media:
 `/import` copies packs.
 
 `.tgs` is rejected on purpose: animated Telegram stickers already work in a
-pack, so there is nothing to convert. Sources over 20 MB are rejected because
-the Bot API will not let a bot download them.
+pack, so there is nothing to convert. Sources sent in the chat are capped at 20
+MB, because the Bot API will not let a bot download more than that; a link is
+fetched from the web instead, where the cap is 200 MB.
 
 ## Requirements
 

@@ -9,7 +9,7 @@ from urllib.parse import unquote, urljoin, urlparse
 import aiohttp
 
 from convert.errors import UnsupportedInput
-from convert.spec import EXTENSION_BY_MIME, MAX_SOURCE_BYTES, SUPPORTED_EXTENSIONS
+from convert.spec import EXTENSION_BY_MIME, MAX_FETCH_BYTES, SUPPORTED_EXTENSIONS
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +19,8 @@ PACK_HOSTS = frozenset({"t.me", "telegram.me", "telegram.dog"})
 
 # a bot that names itself and says where to complain gets fewer doors shut
 USER_AGENT = "Stickerloom/1.0 (+https://t.me/stickerloom_bot)"
-TIMEOUT = aiohttp.ClientTimeout(total=30)
+# no total budget: a 200 MB file may take a while, only silence on the wire is fatal
+TIMEOUT = aiohttp.ClientTimeout(total=None, connect=15, sock_connect=15, sock_read=60)
 MAX_PAGE_BYTES = 1024 * 1024
 MAX_HOPS = 5
 CHUNK = 64 * 1024
@@ -72,38 +73,46 @@ async def resolve(url: str) -> Target:
 
 async def download(url: str, dest: Path) -> None:
     await _guard(url)
-    async with aiohttp.ClientSession(headers={"User-Agent": USER_AGENT},
-                                     timeout=TIMEOUT) as session:
-        async with session.get(url) as answer:
-            if answer.status != 200:
-                raise UnsupportedInput("error.link_unreachable")
-            written = 0
-            with dest.open("wb") as handle:
-                async for chunk in answer.content.iter_chunked(CHUNK):
-                    written += len(chunk)
-                    _fits(written)
-                    handle.write(chunk)
+    try:
+        async with aiohttp.ClientSession(headers={"User-Agent": USER_AGENT},
+                                         timeout=TIMEOUT) as session:
+            async with session.get(url) as answer:
+                if answer.status != 200:
+                    raise UnsupportedInput("error.link_unreachable")
+                written = 0
+                with dest.open("wb") as handle:
+                    async for chunk in answer.content.iter_chunked(CHUNK):
+                        written += len(chunk)
+                        _fits(written)
+                        handle.write(chunk)
+    except (TimeoutError, aiohttp.ServerTimeoutError) as exc:
+        log.info("%s went quiet while downloading", url)
+        raise UnsupportedInput("error.link_slow") from exc
 
 
 # redirects are walked by hand so every hop is checked before it is followed
 async def _open(session: aiohttp.ClientSession, url: str) -> _Answer:
     for _ in range(MAX_HOPS):
         await _guard(url)
-        async with session.get(url, allow_redirects=False) as answer:
-            moved = answer.headers.get("location")
-            if answer.status in (301, 302, 303, 307, 308) and moved:
-                url = urljoin(url, moved)
-                continue
-            if answer.status != 200:
-                log.info("%s answered %s", url, answer.status)
-                raise UnsupportedInput("error.link_unreachable")
-            kind = (answer.headers.get("content-type") or "").split(";")[0].strip().lower()
-            size = int(answer.headers.get("content-length") or 0)
-            _fits(size)
-            page = None
-            if kind in ("text/html", "application/xhtml+xml"):
-                page = (await answer.content.read(MAX_PAGE_BYTES)).decode("utf-8", "replace")
-            return _Answer(str(answer.url), kind, page, size)
+        try:
+            async with session.get(url, allow_redirects=False) as answer:
+                moved = answer.headers.get("location")
+                if answer.status in (301, 302, 303, 307, 308) and moved:
+                    url = urljoin(url, moved)
+                    continue
+                if answer.status != 200:
+                    log.info("%s answered %s", url, answer.status)
+                    raise UnsupportedInput("error.link_unreachable")
+                kind = (answer.headers.get("content-type") or "").split(";")[0].strip().lower()
+                size = int(answer.headers.get("content-length") or 0)
+                _fits(size)
+                page = None
+                if kind in ("text/html", "application/xhtml+xml"):
+                    page = (await answer.content.read(MAX_PAGE_BYTES)).decode("utf-8", "replace")
+                return _Answer(str(answer.url), kind, page, size)
+        except (TimeoutError, aiohttp.ServerTimeoutError) as exc:
+            log.info("%s went quiet", url)
+            raise UnsupportedInput("error.link_slow") from exc
     raise UnsupportedInput("error.link_unreachable")
 
 
@@ -125,8 +134,8 @@ async def _guard(url: str) -> None:
 
 
 def _fits(size: int) -> None:
-    if size > MAX_SOURCE_BYTES:
-        raise UnsupportedInput("error.too_big", mb=MAX_SOURCE_BYTES // (1024 * 1024))
+    if size > MAX_FETCH_BYTES:
+        raise UnsupportedInput("error.too_big", mb=MAX_FETCH_BYTES // (1024 * 1024))
 
 
 def _media_url(page: str, base: str, source: str) -> str | None:

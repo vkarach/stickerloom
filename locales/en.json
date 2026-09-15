@@ -166,6 +166,7 @@
   "admin.nobody": "nobody yet",
   "admin.refresh": "Refresh",
   "error.link_unreachable": "Could not open that link.",
+  "error.link_slow": "That link stalled halfway. Try again or use another host.",
   "error.link_no_media": "No picture or video on that page.",
   "error.link_private": "That link points nowhere public.",
   "error.link_pack": "That is a pack link. /import copies a pack.",
