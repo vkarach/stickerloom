@@ -10,7 +10,7 @@ from bot.admin import admin_ids
 from bot.handlers import router
 from bot.middlewares import AdminMiddleware
 from bot.setup import setup_commands
-from convert.queue import JobQueue
+from convert.queue import JobQueue, sweep_leftovers
 from db import PackRepo, connect
 from i18n import Translator
 from i18n import load as load_locales
@@ -43,6 +43,9 @@ async def main() -> None:
     repo = PackRepo(conn)
 
     async def on_startup(bot: Bot) -> None:
+        left = sweep_leftovers()
+        if left:
+            log.info("swept %d leftover work directories", left)
         await setup_commands(bot)
         for admin in admins:
             await setup_commands(bot, Translator(await repo.lang_for(admin)), admin, admin=True)

@@ -6,7 +6,7 @@ from pathlib import Path
 from convert.decode import expand_frames, few_colors
 from convert.errors import CannotFitSizeLimit, EncodeFailed
 from convert.spec import FPS, MAX_BYTES, MAX_DURATION, STILL_DURATION, target_size
-from models import ConvertResult, MediaInfo
+from models import ConvertResult, MediaInfo, Window
 
 log = logging.getLogger(__name__)
 
@@ -27,30 +27,34 @@ def next_crf(crf: int, size: int) -> int:
     return min(WORST_CRF, max(crf + CRF_STEP, aimed))
 
 
-def output_duration(info: MediaInfo) -> float:
+def output_duration(info: MediaInfo, window: Window = Window()) -> float:
     if not info.is_animated:
         return STILL_DURATION
     if info.duration <= 0:
         return MAX_DURATION
-    return min(info.duration, MAX_DURATION)
+    left = (info.duration - window.start) / window.speed
+    return min(left, MAX_DURATION)
 
 
 def build_args(src: Path, dst: Path, info: MediaInfo, crf: int, fps: int,
                sequence: tuple[str, float] | None = None,
-               scaler: str = "lanczos") -> list[str]:
+               scaler: str = "lanczos", window: Window = Window()) -> list[str]:
     width, height = target_size(info.width, info.height)
-    duration = output_duration(info)
+    duration = output_duration(info, window)
+    # seeking before -i skips the frames instead of decoding and dropping them
+    seek = ["-ss", f"{window.start:.3f}"] if window.start > 0 else []
 
     if sequence is not None:
         pattern, source_fps = sequence
-        source = ["-framerate", str(source_fps), "-i", pattern]
+        source = [*seek, "-framerate", str(source_fps), "-i", pattern]
     elif info.is_animated:
-        source = ["-i", str(src)]
+        source = [*seek, "-i", str(src)]
     else:
         source = ["-loop", "1", "-framerate", str(fps), "-i", str(src)]
 
+    faster = f"setpts=PTS/{window.speed:.6g}," if window.speed != 1.0 else ""
     # premultiply: white under transparent pixels bleeds into the edge as a client scales
-    chain = (f"scale={width}:{height}:flags={scaler},fps={fps},"
+    chain = (f"{faster}scale={width}:{height}:flags={scaler},fps={fps},"
              "format=rgba,premultiply=inplace=1,format=yuva420p")
 
     return [
@@ -72,7 +76,8 @@ def build_args(src: Path, dst: Path, info: MediaInfo, crf: int, fps: int,
     ]
 
 
-async def encode(src: Path, dst: Path, info: MediaInfo, work_dir: Path | None = None) -> ConvertResult:
+async def encode(src: Path, dst: Path, info: MediaInfo, work_dir: Path | None = None,
+                 window: Window = Window()) -> ConvertResult:
     """Produce the golden format, tightening quality until the result fits the size limit."""
     sequence = None
     if info.needs_frame_expansion:
@@ -86,7 +91,7 @@ async def encode(src: Path, dst: Path, info: MediaInfo, work_dir: Path | None = 
 
     while True:
         attempt += 1
-        await _run(build_args(src, dst, info, crf, fps, sequence, scaler))
+        await _run(build_args(src, dst, info, crf, fps, sequence, scaler, window))
         size = dst.stat().st_size
         smallest = size if smallest is None else min(smallest, size)
         log.debug("%s: attempt %d crf=%d fps=%d -> %d bytes", src.name, attempt, crf, fps, size)
@@ -95,7 +100,7 @@ async def encode(src: Path, dst: Path, info: MediaInfo, work_dir: Path | None = 
             width, height = target_size(info.width, info.height)
             return ConvertResult(
                 path=dst, width=width, height=height,
-                duration=output_duration(info), size=size, attempts=attempt,
+                duration=output_duration(info, window), size=size, attempts=attempt,
             )
 
         if crf < WORST_CRF:

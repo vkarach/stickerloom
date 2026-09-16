@@ -2,15 +2,33 @@ import asyncio
 import logging
 import shutil
 import tempfile
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from convert.errors import NeedsWindow
 from convert.pipeline import convert_file
 from models import ConvertResult, Job
 
 log = logging.getLogger(__name__)
 
 Process = Callable[[Path, Path], Awaitable[ConvertResult]]
+
+
+WORK_PREFIX = "stickerloom_"
+# a question left open when the bot went down keeps its files; nobody will answer it now
+LEFTOVER_AGE = 6 * 3600
+
+
+def sweep_leftovers() -> int:
+    """Throw out work directories no running job can still own."""
+    dropped = 0
+    for path in Path(tempfile.gettempdir()).glob(WORK_PREFIX + "*"):
+        if not path.is_dir() or time.time() - path.stat().st_mtime < LEFTOVER_AGE:
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+        dropped += 1
+    return dropped
 
 
 class JobQueue:
@@ -73,24 +91,35 @@ class JobQueue:
         return lock
 
     async def _run(self, job: Job) -> None:
-        work_dir = Path(tempfile.mkdtemp(prefix="stickerloom_"))
+        work_dir = job.work_dir or Path(tempfile.mkdtemp(prefix=WORK_PREFIX))
+        asked = False
         try:
             # cancelling cannot stop ffmpeg midway, but the answer is checked at every step
             await job.on_status("converting")
             source = await job.fetch(work_dir)
             if job.cancelled:
                 return await self._give_up(job)
-            result = await self._process(source, work_dir)
+            process = job.process or self._process
+            result = await process(source, work_dir)
             if job.cancelled:
                 return await self._give_up(job)
             await job.on_done(result)
         except asyncio.CancelledError:
             raise
+        except NeedsWindow as question:
+            # the files stay for whoever answers; the queue is done with this job
+            asked = True
+            if job.on_ask is None:
+                asked = False
+                await job.on_error(question)
+            else:
+                await job.on_ask(question, work_dir)
         except Exception as exc:
             log.exception("job %r failed", job.name)
             await job.on_error(exc)
         finally:
-            shutil.rmtree(work_dir, ignore_errors=True)
+            if not asked:
+                shutil.rmtree(work_dir, ignore_errors=True)
 
     async def _give_up(self, job: Job) -> None:
         log.info("job %r was cancelled, dropping its result", job.name)

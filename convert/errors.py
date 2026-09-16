@@ -27,3 +27,12 @@ class CannotFitSizeLimit(StickerloomError):
     def __init__(self, key: str, smallest: int, **params):
         super().__init__(key, **params)
         self.smallest = smallest
+
+
+class NeedsWindow(Exception):
+    """Not a failure: the source is longer than a sticker may be, so the user picks."""
+
+    def __init__(self, source, info):
+        super().__init__("too long to take whole")
+        self.source = source
+        self.info = info

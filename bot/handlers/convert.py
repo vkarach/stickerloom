@@ -1,15 +1,19 @@
 import hashlib
 import logging
+import shutil
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
 from aiogram import Bot, F, Router
-from aiogram.types import FSInputFile, Message
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import (FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup,
+                           Message)
 
+import states
 from bot.handlers.offer import offer_keyboard
 from bot.handlers.session import ask_for_emoji, settle
-import states
 from db.packs import PackRepo
 from i18n import Translator
 from packs import PackManager
@@ -17,16 +21,18 @@ from packs.emoji import split_emoji
 
 from convert.download import download, resolve
 from convert.errors import StickerloomError, UnsupportedInput
+from convert.pipeline import convert_file
 from convert.queue import JobQueue
 from convert.spec import (
     EXTENSION_BY_MIME,
+    MAX_DURATION,
     MAX_SOURCE_BYTES,
     STILL_DURATION,
     OUTPUT_SUFFIX,
     REJECTED_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
 )
-from models import ConvertResult, Job
+from models import ConvertResult, Job, MediaInfo, Session, Window
 
 log = logging.getLogger(__name__)
 
@@ -229,6 +235,12 @@ async def _start(message: Message, name: str, emoji: str | None, pull: Pull, que
             return
         await _hand_back(message, spot, name, emoji, result, repo, t)
 
+    async def on_ask(question, work_dir: Path) -> None:
+        await _delete(status)
+        _WAITING[spot] = Pending(user_id, question.source, work_dir, question.info, name,
+                                 emoji, message, into_pack)
+        await _ask_window(message, spot, name, question.info.duration, t)
+
     async def on_cancel() -> None:
         await _delete(status)
         await repo.pop_sticker(spot)
@@ -244,11 +256,123 @@ async def _start(message: Message, name: str, emoji: str | None, pull: Pull, que
         await _edit(status, t("convert.crashed", name=name))
 
     position = await queue.submit(Job(
-        key=user_id, name=name, fetch=fetch,
-        on_status=on_status, on_done=on_done, on_error=on_error, on_cancel=on_cancel,
+        key=user_id, name=name, fetch=fetch, on_status=on_status, on_done=on_done,
+        on_error=on_error, on_cancel=on_cancel, on_ask=on_ask,
     ))
     if position > 1:
         await _edit(status, t("convert.queued_position", name=name, n=position))
+
+
+CUT = "cut:"
+FROM_START, FROM_END, SPEED_UP, PICK_SECOND = "start", "end", "speed", "pick"
+
+
+@dataclass
+class Pending:
+    user_id: int
+    source: Path
+    work_dir: Path
+    info: MediaInfo
+    name: str
+    emoji: str | None
+    message: Message
+    into_pack: bool
+    # where the user stood before being asked for a second, to put him back there
+    came_from: Session | None = None
+
+
+# a source waiting for its window to be picked, by the queue slot it already holds
+_WAITING: dict[int, Pending] = {}
+
+
+def _window_keyboard(spot: int, t: Translator) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t("cut.start"), callback_data=f"{CUT}{FROM_START}:{spot}"),
+         InlineKeyboardButton(text=t("cut.end"), callback_data=f"{CUT}{FROM_END}:{spot}")],
+        [InlineKeyboardButton(text=t("cut.speed"), callback_data=f"{CUT}{SPEED_UP}:{spot}"),
+         InlineKeyboardButton(text=t("cut.pick"), callback_data=f"{CUT}{PICK_SECOND}:{spot}")],
+    ])
+
+
+async def _ask_window(message: Message, spot: int, name: str, seconds: float,
+                      t: Translator) -> None:
+    asked = t("cut.ask", name=name, seconds=f"{seconds:.1f}", fit=f"{MAX_DURATION:.0f}")
+    try:
+        sent = await message.answer(asked, reply_markup=_window_keyboard(spot, t),
+                                    reply_to_message_id=message.message_id)
+    except TelegramBadRequest:
+        sent = await message.answer(asked, reply_markup=_window_keyboard(spot, t))
+    _ASKED[spot] = sent
+
+
+# the question itself, so it can be taken down once it is answered
+_ASKED: dict[int, Message] = {}
+
+
+def waiting_window(spot: int) -> Pending | None:
+    return _WAITING.get(spot)
+
+
+async def forget_windows(user_id: int) -> None:
+    """Drop what a cancelled batch left waiting, files and all."""
+    for spot in [n for n, waiting in _WAITING.items() if waiting.user_id == user_id]:
+        waiting = _WAITING.pop(spot)
+        shutil.rmtree(waiting.work_dir, ignore_errors=True)
+        asked = _ASKED.pop(spot, None)
+        if asked is not None:
+            await _delete(asked)
+
+
+async def cut_with(message: Message, spot: int, window: Window, queue: JobQueue,
+                   repo: PackRepo, packs: PackManager, t: Translator) -> bool:
+    """Encode what was waiting, from the source already on disk."""
+    waiting = _WAITING.pop(spot, None)
+    if waiting is None:
+        return False
+    asked = _ASKED.pop(spot, None)
+    if asked is not None:
+        await _delete(asked)
+
+    user_id = waiting.message.from_user.id
+    status = await message.answer(t("convert.queued", name=waiting.name))
+
+    async def fetch(_: Path) -> Path:
+        return waiting.source
+
+    async def process(source: Path, work_dir: Path) -> ConvertResult:
+        return await convert_file(source, work_dir, window)
+
+    async def on_status(_: str) -> None:
+        await _edit(status, t("convert.converting", name=waiting.name))
+
+    async def on_done(result: ConvertResult) -> None:
+        await _delete(status)
+        if waiting.into_pack:
+            await _queue_for_pack(waiting.message, user_id, spot, waiting.name, result,
+                                  repo, packs, t)
+            return
+        await _hand_back(waiting.message, spot, waiting.name, waiting.emoji, result, repo, t)
+
+    async def on_cancel() -> None:
+        await _delete(status)
+        await repo.pop_sticker(spot)
+
+    async def on_error(exc: Exception) -> None:
+        await repo.pop_sticker(spot)
+        if waiting.into_pack:
+            await ask_for_emoji(waiting.message, user_id, repo, t)
+        if isinstance(exc, StickerloomError):
+            await _edit(status, t("convert.failed", name=waiting.name,
+                                  reason=t(exc.key, **exc.params)))
+            return
+        log.exception("unexpected failure converting %r", waiting.name)
+        await _edit(status, t("convert.crashed", name=waiting.name))
+
+    await queue.submit(Job(
+        key=user_id, name=waiting.name, fetch=fetch, on_status=on_status, on_done=on_done,
+        on_error=on_error, on_cancel=on_cancel, work_dir=waiting.work_dir, process=process,
+    ))
+    return True
 
 
 # a plain conversion keeps its slot only until the file is handed back

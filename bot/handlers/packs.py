@@ -10,14 +10,16 @@ from aiogram.types import (CallbackQuery, FSInputFile, InlineKeyboardButton,
                            InlineKeyboardMarkup, Message)
 from aiogram.utils.formatting import Bold, Text, TextLink, as_list
 
-from bot.handlers.convert import handle_link, sha_of
+from bot.handlers.convert import (CUT, FROM_END, PICK_SECOND, SPEED_UP, cut_with,
+                                  handle_link, sha_of, waiting_window)
 from bot.handlers.session import (ADD_ANYWAY, SKIP_DUPLICATE, USE_SUGGESTED,
                                   accept_emoji, ask_for_emoji, resolve_duplicate)
 from convert.download import first_url
 from convert.queue import JobQueue
-from convert.spec import MAX_SOURCE_BYTES
+from convert.spec import MAX_DURATION, MAX_SOURCE_BYTES
 from db.packs import PackRepo
 from i18n import Translator
+from models import Window
 from packs import PackError, PackManager
 from packs.manager import STICKER_FORMAT
 from packs.archive import BadBackup
@@ -311,6 +313,41 @@ async def _restore(message: Message, status: Message, user_id: int, restored,
     await _ask_for_prefix(message, user_id, repo, me.username, t)
 
 
+@router.callback_query(lambda c: c.data and c.data.startswith(CUT))
+async def pick_window(callback: CallbackQuery, queue: JobQueue, repo: PackRepo,
+                      packs: PackManager, t: Translator) -> None:
+    assert callback.data and callback.from_user
+    user_id = callback.from_user.id
+    _, choice, raw = callback.data.split(":")
+    spot = int(raw)
+    waiting = waiting_window(spot)
+    if waiting is None:
+        await callback.answer(t("cut.gone"))
+        return
+
+    if choice == PICK_SECOND:
+        await callback.answer()
+        waiting.came_from = await repo.session(user_id)
+        await repo.enter(user_id, states.TRIMMING, raw)
+        if isinstance(callback.message, Message):
+            await callback.message.answer(
+                t("cut.ask_second", seconds=f"{waiting.info.duration - MAX_DURATION:.1f}"))
+        return
+
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await cut_with(callback.message, spot, _window_for(choice, waiting.info),
+                       queue, repo, packs, t)
+
+
+def _window_for(choice: str, info) -> Window:
+    if choice == FROM_END:
+        return Window(start=max(0.0, info.duration - MAX_DURATION))
+    if choice == SPEED_UP:
+        return Window(speed=info.duration / MAX_DURATION)
+    return Window()
+
+
 @router.message(F.text, ~F.text.startswith("/"))
 async def plain_text(message: Message, bot: Bot, queue: JobQueue, repo: PackRepo,
                      packs: PackManager, t: Translator) -> None:
@@ -320,6 +357,10 @@ async def plain_text(message: Message, bot: Bot, queue: JobQueue, repo: PackRepo
     text = message.text.strip()
 
     here = await repo.session(user_id)
+    if here.state == states.TRIMMING:
+        await _take_second(message, user_id, text, here.target, queue, repo, packs, t)
+        return
+
     if here.state == states.NAMING:
         if here.target:
             await repo.set_pending(user_id, text)
@@ -375,6 +416,33 @@ async def plain_text(message: Message, bot: Bot, queue: JobQueue, repo: PackRepo
         return
 
     await accept_emoji(message, user_id, "".join(split_emoji(text)), repo, packs, t)
+
+
+async def _take_second(message: Message, user_id: int, typed: str, raw: str | None,
+                       queue: JobQueue, repo: PackRepo, packs: PackManager,
+                       t: Translator) -> None:
+    waiting = waiting_window(int(raw)) if raw else None
+    if waiting is None:
+        await repo.leave(user_id)
+        await message.answer(t("cut.gone"))
+        return
+
+    latest = max(0.0, waiting.info.duration - MAX_DURATION)
+    try:
+        start = float(typed.replace(",", "."))
+    except ValueError:
+        await message.answer(t("cut.not_a_second", seconds=f"{latest:.1f}"))
+        return
+    if not 0 <= start <= latest:
+        await message.answer(t("cut.not_a_second", seconds=f"{latest:.1f}"))
+        return
+
+    back = waiting.came_from
+    if back is None:
+        await repo.leave(user_id)
+    else:
+        await repo.enter(user_id, back.state, back.target, back.sticker)
+    await cut_with(message, int(raw), Window(start=start), queue, repo, packs, t)
 
 
 async def _settle_deletion(message: Message, user_id: int, name: str, typed: str,

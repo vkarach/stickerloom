@@ -9,9 +9,10 @@ FILLING = "filling"
 PICKING = "picking"
 RETAGGING = "retagging"
 CONFIRMING = "confirming"
+TRIMMING = "trimming"
 
 ALL = frozenset({IDLE, NAMING, COLLECTING, PREFIX, SOURCE, FILLING, PICKING, RETAGGING,
-                 CONFIRMING})
+                 CONFIRMING, TRIMMING})
 
 # files sent now belong to a pack instead of coming back as a plain conversion
 PACK_MODE = frozenset({COLLECTING, FILLING})

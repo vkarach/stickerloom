@@ -1,6 +1,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,12 @@ class MediaInfo:
     fps: float = 0.0
     size: int = 0
     has_audio: bool = False
+
+
+class Window(NamedTuple):
+    """Which three seconds of a longer source to keep, and how fast to play them."""
+    start: float = 0.0
+    speed: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -69,6 +76,11 @@ class Job:
     on_done: Callable[[ConvertResult], Awaitable[None]]
     on_error: Callable[[Exception], Awaitable[None]]
     on_cancel: Callable[[], Awaitable[None]] | None = None
+    # a source too long to take whole stops here and waits for the user to pick a window
+    on_ask: Callable[[Exception, Path], Awaitable[None]] | None = None
+    # set to carry on with files another job left behind, with its own way of encoding
+    work_dir: Path | None = None
+    process: Callable[[Path, Path], Awaitable[ConvertResult]] | None = None
     cancelled: bool = field(default=False, compare=False)
 
 

@@ -4,6 +4,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.formatting import Bold, Text, as_marked_section
 
 from bot.commands import help_content
+from bot.handlers.convert import forget_windows
 from bot.handlers.packs import drop_preview
 from bot.setup import setup_commands
 from convert.queue import JobQueue
@@ -85,6 +86,7 @@ async def cmd_cancel(message: Message, queue: JobQueue, repo: PackRepo, t: Trans
     user_id = message.from_user.id
 
     converting = queue.cancel(user_id)
+    await forget_windows(user_id)
     waiting = await repo.clear_stickers(user_id)
     busy = (await repo.session(user_id)).state != states.IDLE
 
