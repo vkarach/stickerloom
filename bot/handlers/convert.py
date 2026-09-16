@@ -206,6 +206,10 @@ async def _start(message: Message, name: str, emoji: str | None, pull: Pull, que
             return
         await _hand_back(message, spot, name, emoji, result, repo, t)
 
+    async def on_cancel() -> None:
+        await _delete(status)
+        await repo.pop_sticker(spot)
+
     async def on_error(exc: Exception) -> None:
         await repo.pop_sticker(spot)
         if into_pack:
@@ -218,7 +222,7 @@ async def _start(message: Message, name: str, emoji: str | None, pull: Pull, que
 
     position = await queue.submit(Job(
         key=user_id, name=name, fetch=fetch,
-        on_status=on_status, on_done=on_done, on_error=on_error,
+        on_status=on_status, on_done=on_done, on_error=on_error, on_cancel=on_cancel,
     ))
     if position > 1:
         await _edit(status, t("convert.queued_position", name=name, n=position))

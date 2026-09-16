@@ -60,6 +60,7 @@ class Job:
     on_status: Callable[[str], Awaitable[None]]
     on_done: Callable[[ConvertResult], Awaitable[None]]
     on_error: Callable[[Exception], Awaitable[None]]
+    on_cancel: Callable[[], Awaitable[None]] | None = None
     cancelled: bool = field(default=False, compare=False)
 
 

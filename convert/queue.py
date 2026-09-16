@@ -75,9 +75,14 @@ class JobQueue:
     async def _run(self, job: Job) -> None:
         work_dir = Path(tempfile.mkdtemp(prefix="stickerloom_"))
         try:
+            # cancelling cannot stop ffmpeg midway, but the answer is checked at every step
             await job.on_status("converting")
             source = await job.fetch(work_dir)
+            if job.cancelled:
+                return await self._give_up(job)
             result = await self._process(source, work_dir)
+            if job.cancelled:
+                return await self._give_up(job)
             await job.on_done(result)
         except asyncio.CancelledError:
             raise
@@ -86,6 +91,11 @@ class JobQueue:
             await job.on_error(exc)
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
+
+    async def _give_up(self, job: Job) -> None:
+        log.info("job %r was cancelled, dropping its result", job.name)
+        if job.on_cancel is not None:
+            await job.on_cancel()
 
     def _forget(self, job: Job) -> None:
         try:
