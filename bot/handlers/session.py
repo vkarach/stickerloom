@@ -87,8 +87,11 @@ async def accept_emoji(message: Message, user_id: int, emoji: str,
 
     # the file is still converting: hold the emoji, it goes in the moment the file lands
     if sticker.file_id is None:
-        await repo.name_sticker(sticker.id, emoji)
+        if not await repo.claim_emoji(sticker.id, emoji):
+            return
         await _say(message, sticker, t("sticker.remembered", emoji=emoji))
+        # the file may have landed between that read and that write, leaving it to nobody
+        await settle(message, user_id, sticker.id, repo, packs, t)
         return
 
     name = await repo.active_for(user_id)
@@ -98,10 +101,16 @@ async def accept_emoji(message: Message, user_id: int, emoji: str,
         if not await _mark(message, sticker, warning, keys):
             await message.answer(warning, reply_markup=keys)
         return
+    if not await repo.claim_emoji(sticker.id, emoji):
+        return
+
     if name:
         # an existing pack takes stickers straight away, a new one is only built on /done
+        owned = await repo.claim_ready(sticker.id)
+        if owned is None:
+            return
         try:
-            await packs.add(user_id, name, sticker.file_id, emoji, _format_of(sticker))
+            await packs.add(user_id, name, owned.file_id, emoji, _format_of(owned))
         except PackError as exc:
             await message.answer(t(exc.key, **exc.params))
             return
@@ -109,31 +118,30 @@ async def accept_emoji(message: Message, user_id: int, emoji: str,
             log.exception("could not add a sticker for user %s", user_id)
             await message.answer(t("sticker.add_failed"))
             return
-        await repo.pop_sticker(sticker.id)
-        await repo.remember_sha(name, sticker.sha)
-    else:
-        await repo.name_sticker(sticker.id, emoji)
+        await repo.remember_sha(name, owned.sha)
 
     await _mark(message, sticker, t("sticker.added", emoji=emoji))
-    if await ask_for_emoji(message, user_id, repo, t):
-        return
-    if await repo.count_stickers(user_id) == 0:
-        await message.answer(t("sticker.send_another"))
+    await _move_on(message, user_id, repo, t)
 
 
 # a sticker answered before it was ready is settled here, once the file exists
 async def settle(message: Message, user_id: int, sticker_id: int,
                  repo: PackRepo, packs: PackManager, t: Translator) -> None:
-    sticker = await repo.sticker(sticker_id)
-    if sticker is None or sticker.emoji is None or sticker.file_id is None:
+    waiting = await repo.sticker(sticker_id)
+    if waiting is None or waiting.emoji is None or waiting.file_id is None:
         return
 
     name = await repo.active_for(user_id)
-    if await is_duplicate(user_id, sticker, name, repo):
-        await repo.mark_duplicate(sticker.id, sticker.emoji)
+    if await is_duplicate(user_id, waiting, name, repo):
+        await repo.mark_duplicate(waiting.id, waiting.emoji)
         await message.answer(t("dup.warn"), reply_markup=duplicate_keyboard(t))
         return
     if not name:
+        return
+
+    # whoever takes it out of the queue owns it, so it cannot be added twice
+    sticker = await repo.claim_ready(sticker_id)
+    if sticker is None:
         return
 
     try:
@@ -146,9 +154,17 @@ async def settle(message: Message, user_id: int, sticker_id: int,
         await message.answer(t("sticker.add_failed"))
         return
 
-    await repo.pop_sticker(sticker.id)
     await repo.remember_sha(name, sticker.sha)
     await _say(message, sticker, t("sticker.added", emoji=sticker.emoji))
+    await _move_on(message, user_id, repo, t)
+
+
+# ask about the next one, and nudge only when there is nothing left to wait for at all
+async def _move_on(message: Message, user_id: int, repo: PackRepo, t: Translator) -> None:
+    if await ask_for_emoji(message, user_id, repo, t):
+        return
+    if await repo.queued_count(user_id) == 0:
+        await message.answer(t("sticker.send_another"))
 
 
 async def _say(message: Message, sticker, text: str) -> None:
@@ -170,24 +186,21 @@ async def resolve_duplicate(message: Message, user_id: int, keep: bool,
         await _mark(message, sticker, t("sticker.skipped"))
     else:
         name = await repo.active_for(user_id)
+        await repo.clear_duplicate(sticker.id)
         if name:
+            owned = await repo.claim_ready(sticker.id)
+            if owned is None:
+                return
             try:
-                await packs.add(user_id, name, sticker.file_id, sticker.emoji,
-                                _format_of(sticker))
+                await packs.add(user_id, name, owned.file_id, owned.emoji, _format_of(owned))
             except Exception as exc:
                 log.warning("could not add a duplicate for user %s: %s", user_id, exc)
                 await message.answer(t("sticker.add_failed"))
                 return
-            await repo.pop_sticker(sticker.id)
-            await repo.remember_sha(name, sticker.sha)
-        else:
-            await repo.clear_duplicate(sticker.id)
+            await repo.remember_sha(name, owned.sha)
         await _mark(message, sticker, t("sticker.added", emoji=sticker.emoji))
 
-    if await ask_for_emoji(message, user_id, repo, t):
-        return
-    if await repo.count_stickers(user_id) == 0:
-        await message.answer(t("sticker.send_another"))
+    await _move_on(message, user_id, repo, t)
 
 
 async def _mark(message: Message, sticker, text: str,

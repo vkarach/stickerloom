@@ -86,6 +86,13 @@ class PackRepo:
         "WHERE user_id = ? AND emoji IS NOT NULL AND dup = 0 AND file_id IS NOT NULL ORDER BY id"
     )
     _NAME_STICKER = "UPDATE queued_stickers SET emoji = ? WHERE id = ?"
+    _CLAIM_EMOJI = "UPDATE queued_stickers SET emoji = ? WHERE id = ? AND emoji IS NULL"
+    _CLAIM_READY = (
+        "DELETE FROM queued_stickers "
+        "WHERE id = ? AND emoji IS NOT NULL AND file_id IS NOT NULL AND dup = 0 "
+        "RETURNING id, user_id, file_id, name, suggested, emoji, source_msg, prompt_msg, "
+        "sha, fmt"
+    )
     _MARK_DUP = "UPDATE queued_stickers SET emoji = ?, dup = 1 WHERE id = ?"
     _CLEAR_DUP = "UPDATE queued_stickers SET dup = 0 WHERE id = ?"
     _FIRST_DUP = (
@@ -324,6 +331,19 @@ class PackRepo:
         await self._conn.execute(self._NAME_STICKER, (emoji, sticker_id))
         await self._conn.commit()
 
+    async def claim_emoji(self, sticker_id: int, emoji: str) -> bool:
+        """One writer names a sticker; a second one is told it came too late."""
+        cursor = await self._conn.execute(self._CLAIM_EMOJI, (emoji, sticker_id))
+        await self._conn.commit()
+        return cursor.rowcount == 1
+
+    async def claim_ready(self, sticker_id: int) -> QueuedSticker | None:
+        """Take the sticker out of the queue and hand it over exactly once."""
+        async with self._conn.execute(self._CLAIM_READY, (sticker_id,)) as cursor:
+            row = await cursor.fetchone()
+        await self._conn.commit()
+        return _sticker(row) if row else None
+
     async def pop_sticker(self, sticker_id: int) -> None:
         await self._conn.execute(self._POP_STICKER, (sticker_id,))
         await self._conn.commit()
@@ -331,6 +351,12 @@ class PackRepo:
     async def count_stickers(self, user_id: int) -> int:
         """How many stickers are still waiting for an emoji."""
         async with self._conn.execute(self._COUNT_STICKERS, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        return row["n"] if row else 0
+
+    async def queued_count(self, user_id: int) -> int:
+        """Everything still held for this user, whether it has its emoji or its file yet."""
+        async with self._conn.execute(self._COUNT_ALL, (user_id,)) as cursor:
             row = await cursor.fetchone()
         return row["n"] if row else 0
 
