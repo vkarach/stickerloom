@@ -91,7 +91,7 @@ async def test_a_created_pack_is_remembered_and_made_active(repo, sticker_file):
     pack, _ = await manager.create(ALICE, "mypack", "My Pack", [(sticker_file, "\U0001f525")])
 
     assert [p.name for p in await repo.list_for(ALICE)] == [pack.name]
-    assert await repo.active_for(ALICE) == pack.name
+    assert await repo.open_pack(ALICE) == pack.name
 
 
 async def test_the_first_sticker_carries_the_emoji(repo, sticker_file):

@@ -7,6 +7,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.handlers.session import ask_for_emoji
+import states
 from db.packs import PackRepo
 from i18n import Translator
 from packs.emoji import is_emoji
@@ -71,18 +72,14 @@ async def take_it(callback: CallbackQuery, repo: PackRepo, t: Translator) -> Non
         return
 
     if callback.data == NEW:
-        await repo.clear_active(user_id)
-        await repo.set_building(user_id, True)
-        await repo.set_asking(user_id, "title")
+        await repo.enter(user_id, states.NAMING)
     else:
         pack = await repo.find_by_tag(user_id, callback.data[len(PICK):])
         if pack is None:
             await callback.answer(t("packs.gone"))
             await _show(callback, offer_keyboard(t))
             return
-        await repo.set_active(user_id, pack.name)
-        await repo.set_building(user_id, False)
-        await repo.set_asking(user_id, None)
+        await repo.enter(user_id, states.FILLING, pack.name)
 
     await callback.answer()
     await _show(callback, None)

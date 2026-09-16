@@ -30,6 +30,14 @@ class ConvertResult:
 
 
 @dataclass(frozen=True)
+class Session:
+    state: str
+    # the pack or source set the state is about, and the sticker when one was chosen
+    target: str | None = None
+    sticker: str | None = None
+
+
+@dataclass(frozen=True)
 class Pack:
     user_id: int
     name: str

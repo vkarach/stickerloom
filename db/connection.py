@@ -11,13 +11,10 @@ DB_PATH = DB_DIR / "stickerloom.db"
 
 
 _MIGRATIONS = (
-    ("users", "asking", "TEXT"),
-    ("users", "building", "INTEGER NOT NULL DEFAULT 0"),
-    ("users", "editing", "TEXT"),
-    ("users", "importing", "TEXT"),
-    ("users", "deleting", "TEXT"),
-    ("users", "editing_pack", "TEXT"),
     ("users", "lang", "TEXT"),
+    ("users", "state", "TEXT NOT NULL DEFAULT 'idle'"),
+    ("users", "target", "TEXT"),
+    ("users", "sticker", "TEXT"),
     ("queued_stickers", "emoji", "TEXT"),
     ("queued_stickers", "sha", "TEXT"),
     ("queued_stickers", "dup", "INTEGER NOT NULL DEFAULT 0"),
@@ -34,6 +31,25 @@ async def _rebuild_queue(conn: aiosqlite.Connection) -> None:
     if any(row[1] == "file_id" and row[3] for row in columns):
         await conn.execute("DROP TABLE queued_stickers")
         log.info("rebuilt queued_stickers")
+
+
+# the six flags that used to spell out a mode; one state column says it now
+_RETIRED = ("active_pack", "asking", "building", "editing", "importing", "deleting",
+            "editing_pack", "next_emoji", "awaiting_title")
+
+
+async def _retire_flags(conn: aiosqlite.Connection) -> None:
+    async with conn.execute("PRAGMA table_info(users)") as cursor:
+        existing = {row[1] for row in await cursor.fetchall()}
+    for column in _RETIRED:
+        if column not in existing:
+            continue
+        try:
+            await conn.execute(f"ALTER TABLE users DROP COLUMN {column}")
+        except Exception as exc:
+            log.warning("could not drop users.%s: %s", column, exc)
+            continue
+        log.info("migrated: dropped users.%s", column)
 
 
 async def _migrate(conn: aiosqlite.Connection) -> None:
@@ -54,6 +70,7 @@ async def connect() -> aiosqlite.Connection:
     await _rebuild_queue(conn)
     await conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
     await _migrate(conn)
+    await _retire_flags(conn)
     await conn.commit()
     log.info("connected to %s", DB_PATH)
     return conn

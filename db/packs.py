@@ -1,7 +1,8 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from models import Overview, Pack, QueuedSticker
+import states
+from models import Overview, Pack, QueuedSticker, Session
 from packs.names import tag_for
 
 log = logging.getLogger(__name__)
@@ -23,29 +24,11 @@ class PackRepo:
     _FIND = "SELECT user_id, name, title, created_at FROM packs WHERE user_id = ? AND name = ?"
     _FORGET = "DELETE FROM packs WHERE user_id = ? AND name = ?"
 
-    _SET_ACTIVE = "UPDATE users SET active_pack = ? WHERE user_id = ?"
-    _GET_ACTIVE = "SELECT active_pack FROM users WHERE user_id = ?"
+    _ENTER = "UPDATE users SET state = ?, target = ?, sticker = ? WHERE user_id = ?"
+    _GET_STATE = "SELECT state, target, sticker FROM users WHERE user_id = ?"
 
     _SET_PENDING = "UPDATE users SET pending_title = ? WHERE user_id = ?"
     _GET_PENDING = "SELECT pending_title FROM users WHERE user_id = ?"
-
-    _SET_ASKING = "UPDATE users SET asking = ? WHERE user_id = ?"
-    _GET_ASKING = "SELECT asking FROM users WHERE user_id = ?"
-
-    _SET_BUILDING = "UPDATE users SET building = ? WHERE user_id = ?"
-    _GET_BUILDING = "SELECT building FROM users WHERE user_id = ?"
-
-    _SET_DELETING = "UPDATE users SET deleting = ? WHERE user_id = ?"
-    _GET_DELETING = "SELECT deleting FROM users WHERE user_id = ?"
-
-    _SET_EDITING_PACK = "UPDATE users SET editing_pack = ? WHERE user_id = ?"
-    _GET_EDITING_PACK = "SELECT editing_pack FROM users WHERE user_id = ?"
-
-    _SET_IMPORTING = "UPDATE users SET importing = ? WHERE user_id = ?"
-    _GET_IMPORTING = "SELECT importing FROM users WHERE user_id = ?"
-
-    _SET_EDITING = "UPDATE users SET editing = ? WHERE user_id = ?"
-    _GET_EDITING = "SELECT editing FROM users WHERE user_id = ?"
 
     _SET_LANG = "UPDATE users SET lang = ? WHERE user_id = ?"
     _GET_LANG = "SELECT lang FROM users WHERE user_id = ?"
@@ -151,22 +134,31 @@ class PackRepo:
         """Callbacks carry a tag, not a name: a set name does not fit in 64 bytes."""
         return next((p for p in await self.list_for(user_id) if tag_for(p.name) == tag), None)
 
-    async def set_active(self, user_id: int, name: str) -> None:
+    async def enter(self, user_id: int, state: str, target: str | None = None,
+                    sticker: str | None = None) -> None:
+        """One state at a time: entering one leaves whatever the user was in before."""
+        if state not in states.ALL:
+            raise ValueError(f"no such state: {state}")
         await self._ensure(user_id)
-        await self._conn.execute(self._SET_ACTIVE, (name, user_id))
+        await self._conn.execute(self._ENTER, (state, target, sticker, user_id))
         await self._conn.commit()
 
-    async def active_for(self, user_id: int) -> str | None:
-        async with self._conn.execute(self._GET_ACTIVE, (user_id,)) as cursor:
+    async def leave(self, user_id: int) -> None:
+        await self.enter(user_id, states.IDLE)
+
+    async def session(self, user_id: int) -> Session:
+        async with self._conn.execute(self._GET_STATE, (user_id,)) as cursor:
             row = await cursor.fetchone()
-        return row["active_pack"] if row else None
+        if row is None:
+            return Session(states.IDLE)
+        return Session(row["state"] or states.IDLE, row["target"], row["sticker"])
 
-    async def clear_active(self, user_id: int) -> None:
-        await self._ensure(user_id)
-        await self._conn.execute(self._SET_ACTIVE, (None, user_id))
-        await self._conn.commit()
+    async def open_pack(self, user_id: int) -> str | None:
+        """The pack stickers go into right now, if one is open at all."""
+        found = await self.session(user_id)
+        return found.target if found.state == states.FILLING else None
 
-    async def set_pending(self, user_id: int, title: str) -> None:
+    async def set_pending(self, user_id: int, title: str | None) -> None:
         await self._ensure(user_id)
         await self._conn.execute(self._SET_PENDING, (title, user_id))
         await self._conn.commit()
@@ -175,68 +167,6 @@ class PackRepo:
         async with self._conn.execute(self._GET_PENDING, (user_id,)) as cursor:
             row = await cursor.fetchone()
         return row["pending_title"] if row else None
-
-    async def set_asking(self, user_id: int, kind: str | None) -> None:
-        """Remember what the next plain message answers: a pack name, or a link prefix."""
-        await self._ensure(user_id)
-        await self._conn.execute(self._SET_ASKING, (kind, user_id))
-        await self._conn.commit()
-
-    async def asking_for(self, user_id: int) -> str | None:
-        async with self._conn.execute(self._GET_ASKING, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-        return row["asking"] if row else None
-
-    async def set_building(self, user_id: int, building: bool) -> None:
-        await self._ensure(user_id)
-        await self._conn.execute(self._SET_BUILDING, (int(building), user_id))
-        await self._conn.commit()
-
-    async def is_building(self, user_id: int) -> bool:
-        async with self._conn.execute(self._GET_BUILDING, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-        return bool(row["building"]) if row else False
-
-    async def set_deleting(self, user_id: int, name: str | None) -> None:
-        await self._ensure(user_id)
-        await self._conn.execute(self._SET_DELETING, (name, user_id))
-        await self._conn.commit()
-
-    async def deleting_for(self, user_id: int) -> str | None:
-        async with self._conn.execute(self._GET_DELETING, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-        return row["deleting"] if row else None
-
-    async def set_editing_pack(self, user_id: int, name: str | None) -> None:
-        """The pack whose stickers the user is picking from, by button or by sending one."""
-        await self._ensure(user_id)
-        await self._conn.execute(self._SET_EDITING_PACK, (name, user_id))
-        await self._conn.commit()
-
-    async def editing_pack_for(self, user_id: int) -> str | None:
-        async with self._conn.execute(self._GET_EDITING_PACK, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-        return row["editing_pack"] if row else None
-
-    async def set_importing(self, user_id: int, source: str | None) -> None:
-        await self._ensure(user_id)
-        await self._conn.execute(self._SET_IMPORTING, (source, user_id))
-        await self._conn.commit()
-
-    async def importing_for(self, user_id: int) -> str | None:
-        async with self._conn.execute(self._GET_IMPORTING, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-        return row["importing"] if row else None
-
-    async def set_editing(self, user_id: int, file_id: str | None) -> None:
-        await self._ensure(user_id)
-        await self._conn.execute(self._SET_EDITING, (file_id, user_id))
-        await self._conn.commit()
-
-    async def editing_for(self, user_id: int) -> str | None:
-        async with self._conn.execute(self._GET_EDITING, (user_id,)) as cursor:
-            row = await cursor.fetchone()
-        return row["editing"] if row else None
 
     async def set_lang(self, user_id: int, lang: str) -> None:
         await self._ensure(user_id)

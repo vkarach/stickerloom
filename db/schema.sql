@@ -1,15 +1,11 @@
 CREATE TABLE IF NOT EXISTS users (
     user_id        INTEGER PRIMARY KEY,
-    active_pack    TEXT,
-    pending_title  TEXT,
     emoji          TEXT,
-    asking         TEXT,
-    building       INTEGER NOT NULL DEFAULT 0,
-    editing        TEXT,
-    importing      TEXT,
-    deleting       TEXT,
-    editing_pack   TEXT,
-    lang           TEXT
+    lang           TEXT,
+    pending_title  TEXT,
+    state          TEXT NOT NULL DEFAULT 'idle',
+    target         TEXT,
+    sticker        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS packs (

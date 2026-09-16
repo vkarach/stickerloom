@@ -5,6 +5,7 @@ from pathlib import Path
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile, InputSticker
 
+import states
 from models import Pack
 from packs.archive import build as build_archive
 from packs.emoji import MAX_EMOJI, split_emoji
@@ -111,7 +112,7 @@ class PackManager:
 
         log.info("user %s created pack %s with %d stickers", user_id, name, added)
         pack = await self._repo.remember(user_id, name, title)
-        await self._repo.set_active(user_id, name)
+        await self._repo.enter(user_id, states.FILLING, name)
         return pack, added
 
     async def add(self, user_id: int, name: str, source, emoji: str,

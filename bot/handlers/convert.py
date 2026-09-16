@@ -9,6 +9,7 @@ from aiogram.types import FSInputFile, Message
 
 from bot.handlers.offer import offer_keyboard
 from bot.handlers.session import ask_for_emoji, settle
+import states
 from db.packs import PackRepo
 from i18n import Translator
 from packs import PackManager
@@ -107,7 +108,7 @@ def _caption(result: ConvertResult, emoji: str | None, t: Translator) -> str:
 
 
 async def _in_pack_mode(user_id: int, repo: PackRepo) -> bool:
-    return bool(await repo.is_building(user_id) or await repo.active_for(user_id))
+    return (await repo.session(user_id)).state in states.PACK_MODE
 
 
 async def _queue_for_pack(message: Message, user_id: int, spot: int, name: str,

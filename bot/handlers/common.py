@@ -8,6 +8,7 @@ from bot.handlers.packs import drop_preview
 from bot.setup import setup_commands
 from convert.queue import JobQueue
 from convert.spec import FPS, LONG_SIDE, MAX_BYTES, MAX_DURATION, STILL_DURATION
+import states
 from db.packs import PackRepo
 from i18n import Translator, languages
 
@@ -85,18 +86,10 @@ async def cmd_cancel(message: Message, queue: JobQueue, repo: PackRepo, t: Trans
 
     converting = queue.cancel(user_id)
     waiting = await repo.clear_stickers(user_id)
-    busy = bool(await repo.active_for(user_id) or await repo.is_building(user_id)
-                or await repo.asking_for(user_id) or await repo.editing_for(user_id)
-                or await repo.importing_for(user_id) or await repo.deleting_for(user_id))
+    busy = (await repo.session(user_id)).state != states.IDLE
 
-    await repo.clear_active(user_id)
-    await repo.set_building(user_id, False)
     await repo.set_pending(user_id, None)
-    await repo.set_asking(user_id, None)
-    await repo.set_editing(user_id, None)
-    await repo.set_importing(user_id, None)
-    await repo.set_deleting(user_id, None)
-    await repo.set_editing_pack(user_id, None)
+    await repo.leave(user_id)
     await drop_preview(message, user_id)
 
     dropped = converting + waiting

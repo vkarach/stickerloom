@@ -94,7 +94,7 @@ async def accept_emoji(message: Message, user_id: int, emoji: str,
         await settle(message, user_id, sticker.id, repo, packs, t)
         return
 
-    name = await repo.active_for(user_id)
+    name = await repo.open_pack(user_id)
     if await is_duplicate(user_id, sticker, name, repo):
         await repo.mark_duplicate(sticker.id, emoji)
         warning, keys = t("dup.warn"), duplicate_keyboard(t)
@@ -131,7 +131,7 @@ async def settle(message: Message, user_id: int, sticker_id: int,
     if waiting is None or waiting.emoji is None or waiting.file_id is None:
         return
 
-    name = await repo.active_for(user_id)
+    name = await repo.open_pack(user_id)
     if await is_duplicate(user_id, waiting, name, repo):
         await repo.mark_duplicate(waiting.id, waiting.emoji)
         await message.answer(t("dup.warn"), reply_markup=duplicate_keyboard(t))
@@ -185,7 +185,7 @@ async def resolve_duplicate(message: Message, user_id: int, keep: bool,
         await repo.pop_sticker(sticker.id)
         await _mark(message, sticker, t("sticker.skipped"))
     else:
-        name = await repo.active_for(user_id)
+        name = await repo.open_pack(user_id)
         await repo.clear_duplicate(sticker.id)
         if name:
             owned = await repo.claim_ready(sticker.id)

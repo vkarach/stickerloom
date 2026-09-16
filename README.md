@@ -70,6 +70,16 @@ it; otherwise the bot asks for a link prefix and builds a new pack, exactly as
 /newpack does. Only the files the manifest lists are unpacked, and only from
 the zip's own top level.
 
+## State
+
+A user is in exactly one state at a time, held in one column: idle, naming,
+collecting, prefix, source, filling, picking, retagging or confirming. Entering
+one leaves the one before by construction, so nothing has to be cleared by hand
+and no two half-finished flows can overlap. What the state is about travels
+with it: the pack, the set being imported, the sticker being retagged. A plain
+text message means whatever the state says it means, and files go into a pack
+only while collecting or filling.
+
 ## Language
 
 Every user-facing string lives in `locales/<lang>.json` and is looked up by key;
