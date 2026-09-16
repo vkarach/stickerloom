@@ -6,10 +6,9 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from bot.handlers.session import ask_for_emoji, settle
+from bot.handlers.session import ask_for_emoji
 from db.packs import PackRepo
 from i18n import Translator
-from packs import PackManager
 from packs.emoji import is_emoji
 from packs.names import tag_for
 
@@ -63,11 +62,11 @@ async def _show(callback: CallbackQuery, keyboard: InlineKeyboardMarkup | None) 
 
 
 @router.callback_query(F.data.startswith(PICK) | (F.data == NEW))
-async def take_it(callback: CallbackQuery, repo: PackRepo, packs: PackManager,
-                  t: Translator) -> None:
+async def take_it(callback: CallbackQuery, repo: PackRepo, t: Translator) -> None:
     assert callback.data and callback.from_user
     user_id = callback.from_user.id
-    if not isinstance(callback.message, Message) or not callback.message.document:
+    ready = _file_on(callback.message)
+    if ready is None:
         await callback.answer(t("offer.file_gone"))
         return
 
@@ -88,20 +87,26 @@ async def take_it(callback: CallbackQuery, repo: PackRepo, packs: PackManager,
     await callback.answer()
     await _show(callback, None)
 
-    # the document this bot just sent is already a valid sticker file on Telegram
-    document = callback.message.document
-    shown = _emoji_of(callback.message)
-    spot = await repo.push_sticker(user_id, document.file_id, document.file_name or "sticker",
-                                   shown, callback.message.message_id)
-    # the emoji is written on the file itself, so there is nothing left to ask
-    if shown:
-        await repo.name_sticker(spot, shown)
-        await settle(callback.message, user_id, spot, repo, packs, t)
+    # the file this bot just sent is already a valid sticker file on Telegram
+    file_id, name, shown = ready
+    await repo.push_sticker(user_id, file_id, name, shown, callback.message.message_id)
 
     if callback.data == NEW:
         await callback.message.answer(t("pack.ask_name"))
         return
     await ask_for_emoji(callback.message, user_id, repo, t)
+
+
+# what the offer was shown under: a converted document, or a sticker that needed nothing
+def _file_on(message) -> tuple[str, str, str | None] | None:
+    if not isinstance(message, Message):
+        return None
+    if message.document:
+        return (message.document.file_id, message.document.file_name or "sticker",
+                _emoji_of(message))
+    if message.sticker:
+        return message.sticker.file_id, "sticker.webm", message.sticker.emoji
+    return None
 
 
 def _emoji_of(message: Message) -> str | None:

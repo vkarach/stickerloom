@@ -59,6 +59,27 @@ def conforms(info) -> bool:
     return 0 < info.size <= MAX_BYTES
 
 
+# names the rule a near-miss webm broke, so the log says why it was re-encoded
+def mismatch(info) -> str:
+    if info.codec != "vp9":
+        return f"codec {info.codec}"
+    if "webm" not in info.container and "matroska" not in info.container:
+        return f"container {info.container}"
+    if info.has_audio:
+        return "carries audio"
+    if max(info.width, info.height) != LONG_SIDE:
+        return f"long side {max(info.width, info.height)}"
+    if info.width % 2 or info.height % 2:
+        return f"odd size {info.width}x{info.height}"
+    if info.duration > MAX_DURATION:
+        return f"duration {info.duration}"
+    if info.fps > FPS + 0.5:
+        return f"fps {info.fps}"
+    if not 0 < info.size <= MAX_BYTES:
+        return f"size {info.size}"
+    return "nothing"
+
+
 def target_size(width: int, height: int) -> tuple[int, int]:
     """Fit the source so its long side is exactly 512, keeping the aspect ratio."""
     if width <= 0 or height <= 0:

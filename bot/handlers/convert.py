@@ -33,6 +33,8 @@ router = Router()
 
 MEDIA = F.document | F.photo | F.sticker | F.animation | F.video | F.video_note
 
+READY_NAME = "sticker" + OUTPUT_SUFFIX
+
 Pull = Callable[[Path], Awaitable[None]]
 
 
@@ -138,6 +140,11 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
                        repo: PackRepo, packs: PackManager, t: Translator) -> None:
     assert message.from_user
 
+    # what Telegram already serves as a video sticker is one, whatever ffprobe makes of it
+    if message.sticker and message.sticker.is_video:
+        await _take_ready(message, t, repo)
+        return
+
     try:
         source = _source(message)
         _validate(source.name, source.size)
@@ -151,6 +158,21 @@ async def handle_media(message: Message, bot: Bot, queue: JobQueue,
     # an emoji typed on the file itself is an answer, not a suggestion
     answered = "".join(split_emoji(message.caption or ""))
     await _start(message, source.name, source.emoji, pull, queue, repo, packs, t, answered)
+
+
+async def _take_ready(message: Message, t: Translator, repo: PackRepo) -> None:
+    assert message.from_user and message.sticker
+    user_id = message.from_user.id
+    sticker = message.sticker
+    if not await _in_pack_mode(user_id, repo):
+        await message.answer_sticker(sticker.file_id, reply_markup=offer_keyboard(t))
+        return
+
+    spot = await repo.push_sticker(user_id, sticker.file_id, READY_NAME, sticker.emoji,
+                                   message.message_id)
+    # a sticker carries no bytes to hash, but Telegram gives every file its own id
+    await repo.attach(spot, sticker.file_id, f"tg:{sticker.file_unique_id}")
+    await ask_for_emoji(message, user_id, repo, t)
 
 
 # a link is intake too: the page is read here, the file itself is pulled by the worker

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from convert.encoder import encode
 from convert.probe import probe
-from convert.spec import OUTPUT_SUFFIX, conforms
+from convert.spec import OUTPUT_SUFFIX, conforms, mismatch
 from models import ConvertResult
 
 log = logging.getLogger(__name__)
@@ -16,6 +16,9 @@ async def convert_file(src: Path, work_dir: Path) -> ConvertResult:
         log.info("%s is already a valid video sticker, left untouched", src.name)
         return ConvertResult(path=src, width=info.width, height=info.height,
                              duration=info.duration, size=info.size, attempts=0)
+
+    if info.codec == "vp9":
+        log.info("%s is webm already, but %s", src.name, mismatch(info))
 
     # a webm source would otherwise be handed to ffmpeg as its own output
     dst = work_dir / ("converted" + OUTPUT_SUFFIX)
