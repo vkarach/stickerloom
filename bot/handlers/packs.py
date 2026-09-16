@@ -11,7 +11,8 @@ from aiogram.types import (CallbackQuery, FSInputFile, InlineKeyboardButton,
 from aiogram.utils.formatting import Bold, Text, TextLink, as_list
 
 from bot.handlers.convert import (CUT, FROM_END, PICK_SECOND, SPEED_UP, cut_with,
-                                  handle_link, sha_of, waiting_window)
+                                  handle_link, sha_of, tag_handed_back,
+                                  waiting_window)
 from bot.handlers.session import (ADD_ANYWAY, SKIP_DUPLICATE, USE_SUGGESTED,
                                   accept_emoji, ask_for_emoji, resolve_duplicate)
 from convert.download import first_url
@@ -409,6 +410,8 @@ async def plain_text(message: Message, bot: Bot, queue: JobQueue, repo: PackRepo
         return
 
     if await repo.head_sticker(user_id) is None:
+        if is_emoji(text):
+            await tag_handed_back(message, user_id, "".join(split_emoji(text)), t)
         return
 
     if not is_emoji(text):

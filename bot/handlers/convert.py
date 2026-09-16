@@ -17,7 +17,7 @@ from bot.handlers.session import ask_for_emoji, settle
 from db.packs import PackRepo
 from i18n import Translator
 from packs import PackManager
-from packs.emoji import split_emoji
+from packs.emoji import is_emoji, split_emoji
 
 from convert.download import download, resolve
 from convert.errors import StickerloomError, UnsupportedInput
@@ -382,8 +382,46 @@ async def _hand_back(message: Message, spot: int, name: str, emoji: str | None,
     chosen = (waiting.emoji if waiting else None) or emoji
     await repo.pop_sticker(spot)
     document = FSInputFile(result.path, filename=Path(name).stem + OUTPUT_SUFFIX)
-    await message.answer_document(document, caption=_caption(result, chosen, t),
-                                  reply_markup=offer_keyboard(t))
+    body = _caption(result, None, t)
+    sent = await message.answer_document(document, caption=_caption(result, chosen, t),
+                                         reply_markup=offer_keyboard(t))
+    _HANDED[message.from_user.id] = Handed(sent.message_id, body)
+
+
+class Handed(NamedTuple):
+    message_id: int
+    caption: str
+
+
+# the last file handed back to a user, so an emoji typed after it knows where to land
+_HANDED: dict[int, Handed] = {}
+
+
+# no prompt and no reply: the emoji simply appears on the file it was meant for
+async def tag_handed_back(message: Message, user_id: int, emoji: str,
+                          t: Translator) -> bool:
+    reply = message.reply_to_message
+    if reply is not None and reply.document:
+        target, body = reply.message_id, _body_of(reply.caption or "")
+    else:
+        handed = _HANDED.get(user_id)
+        if handed is None:
+            return False
+        target, body = handed
+    try:
+        await message.bot.edit_message_caption(
+            chat_id=message.chat.id, message_id=target, caption=f"{emoji} {body}",
+            reply_markup=offer_keyboard(t))
+    except TelegramBadRequest as exc:
+        log.info("could not tag the file handed back: %s", exc)
+        return False
+    _HANDED[user_id] = Handed(target, body)
+    return True
+
+
+def _body_of(caption: str) -> str:
+    head, _, rest = caption.partition(" ")
+    return rest if rest and is_emoji(head) else caption
 
 
 async def _edit(status: Message, text: str) -> None:
