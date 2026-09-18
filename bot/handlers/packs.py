@@ -215,8 +215,10 @@ async def keep_title(callback: CallbackQuery, bot: Bot, repo: PackRepo,
         return
     if callback.message.reply_markup:
         await callback.message.edit_reply_markup(reply_markup=None)
+    here = await repo.session(callback.from_user.id)
     me = await bot.me()
-    await _ask_for_prefix(callback.message, callback.from_user.id, repo, me.username, t)
+    await _ask_for_prefix(callback.message, callback.from_user.id, repo, me.username, t,
+                          here.target)
 
 
 @router.callback_query(lambda c: c.data in (ADD_ANYWAY, SKIP_DUPLICATE))
